@@ -1,0 +1,61 @@
+@import url('https://fonts.googleapis.com/css2?family=Belleza&family=Inter:wght@300;400;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Smooth transition for theme switching & premium background */
+  body {
+    @apply transition-colors duration-500 bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Apply Belleza to all headings globally */
+  h1, h2, h3, h4, .font-belleza {
+    font-family: 'Belleza', sans-serif;
+  }
+}
+
+@layer components {
+  /* High-end link effect used in your Navbar */
+  .nav-link {
+    @apply relative py-1 text-sm uppercase tracking-widest font-medium transition-colors cursor-pointer;
+  }
+
+  .nav-link::after {
+    content: '';
+    @apply absolute bottom-0 left-0 w-0 h-0.5 bg-primaryPurple transition-all duration-300;
+  }
+
+  .nav-link:hover::after {
+    @apply w-full;
+  }
+
+  /* Custom Glassmorphism Utility for cards and nav */
+  .glass {
+    @apply bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border border-white/20 dark:border-slate-800;
+  }
+  
+  /* Senior-Level Button Base */
+  .btn-premium {
+    @apply px-8 py-3 bg-primaryPurple text-white font-bold rounded-xl 
+           hover:shadow-[0_10px_20px_rgba(123,44,191,0.3)] hover:-translate-y-0.5 
+           active:scale-95 transition-all duration-300 flex items-center justify-center gap-2;
+  }
+}
+
+/* Custom scrollbar for a "branded" browser experience */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-slate-100 dark:bg-slate-900;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 dark:bg-slate-700 rounded-full hover:bg-primaryPurple transition-colors;
+}

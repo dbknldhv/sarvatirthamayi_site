@@ -1,0 +1,57 @@
+body {
+  margin: 0;
+  font-family: "Segoe UI", sans-serif;
+}
+@font-face {
+  font-family: "Belleza";
+  src: url("./assets/fonts/Belleza-Regular.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+}
+.login-container {
+  display: flex;
+  height: 100vh;
+}
+
+.left-image img {
+  width: 50vw;
+  height: 100vh;
+  object-fit: cover;
+}
+
+.login-box {
+  width: 50vw;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.login-box input {
+  width: 300px;
+  padding: 12px;
+  margin: 10px 0;
+}
+
+.login-box button {
+  width: 300px;
+  padding: 12px;
+  background: purple;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+.logo {
+  width: 80px;
+  margin-bottom: 20px;
+}
+
+.admin-login {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+

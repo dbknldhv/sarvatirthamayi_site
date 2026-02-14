@@ -1,0 +1,96 @@
+Folder PATH listing for volume New Volume
+Volume serial number is B266-1B03
+D:.
+|   App.jsx
+|   main.jsx
+|   project_structure.txt
+|   
++---api
+|       api.js
+|       
++---assets
+|   |   event-banner.png
+|   |   hero-bg.jpg
+|   |   login-illustration.jpg
+|   |   login.png
+|   |   logo.png
+|   |   temple.jpg
+|   |   
+|   \---fonts
+|           Belleza-Regular.ttf
+|           
++---components
+|       Navbar.jsx
+|       ProtectedRoute.jsx
+|       SectionDivider.jsx
+|       SectionHeading.jsx
+|       
++---context
+|       AuthContext.jsx
+|       
++---pages
+|   |   About.jsx
+|   |   JoinNow.jsx
+|   |   LandingPage.jsx
+|   |   Signup.jsx
+|   |   Temples.jsx
+|   |   
+|   +---admin
+|   |   |   AdminLogin.jsx
+|   |   |   Dashboard.jsx
+|   |   |   ForgotPassword.jsx
+|   |   |   ResetPassword.jsx
+|   |   |   
+|   |   +---donation
+|   |   |       DonationList.jsx
+|   |   |       UserDonation.jsx
+|   |   |       
+|   |   +---event
+|   |   |       EventBookings.jsx
+|   |   |       EventList.jsx
+|   |   |       
+|   |   +---membership
+|   |   |       MembershipList.jsx
+|   |   |       PurchasedCards.jsx
+|   |   |       
+|   |   +---profile
+|   |   |       Profile.jsx
+|   |   |       
+|   |   +---ritual
+|   |   |       RitualBookings.jsx
+|   |   |       RitualList.jsx
+|   |   |       RitualPackages.jsx
+|   |   |       RitualTypes.jsx
+|   |   |       
+|   |   +---settings
+|   |   |       Menu.jsx
+|   |   |       Translation.jsx
+|   |   |       
+|   |   +---temple
+|   |   |       TempleBookings.jsx
+|   |   |       TempleList.jsx
+|   |   |       
+|   |   \---users
+|   |           Users.jsx
+|   |           
+|   +---Services
+|   |       Assisstance.jsx
+|   |       Events.jsx
+|   |       Rituals.jsx
+|   |       
+|   +---user
+|   |       Login.jsx
+|   |       UserLogin.jsx
+|   |       
+|   \---ved-path-shala
+|           VedaPathShala.jsx
+|           
++---services
+|       authService.js
+|       
+\---styles
+        admin-login.css
+        fonts.css
+        style.css
+        tailwind.css
+        

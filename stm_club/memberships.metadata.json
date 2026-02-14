@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"sql_id":{"$numberInt":"1"}},"name":"sql_id_1","sparse":true}],"uuid":"aaaed4a98e8340b58a2eef2145a61bdf","collectionName":"memberships","type":"collection"}
