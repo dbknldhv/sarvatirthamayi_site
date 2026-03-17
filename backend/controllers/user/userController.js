@@ -3,46 +3,40 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const db = require("../../config/db");
 
-// --- EMAIL CONFIGURATION ---
-// --- UPDATED EMAIL CONFIGURATION ---
+// --- 1. EMAIL CONFIGURATION ---
 const transporter = nodemailer.createTransport({
     host: process.env.MAIL_HOST,
-    port: 465, // Gmail SSL port
-    secure: true, // Must be true for 465
+    port: parseInt(process.env.MAIL_PORT) || 465, // Gmail SSL port
+    secure: true, 
     auth: {
         user: process.env.MAIL_USER,
         pass: process.env.MAIL_PASS // 16-character App Password
     },
-    // This helps bypass local network restrictions
     tls: {
         rejectUnauthorized: false 
     }
 });
-// --- STEP 1: SIGNUP & SEND OTP ---
+
+// --- 2. AUTHENTICATION: SIGNUP & SEND OTP ---
 exports.signupUser = async (req, res) => {
     try {
         const { first_name, last_name, email, mobile_number, password } = req.body;
 
-        // Defensive checks to prevent .trim() errors if fields are missing in Postman
+        // Validation
         if (!first_name || !mobile_number || !email || !password) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "First name, mobile, email, and password are required." 
-            });
+            return res.status(400).json({ success: false, message: "Required fields are missing." });
         }
 
         const cleanMobile = mobile_number.trim();
         const cleanEmail = email.toLowerCase().trim();
 
+        // Check for existing user
         let user = await User.findOne({ 
             $or: [{ mobile_number: cleanMobile }, { email: cleanEmail }] 
         });
         
         if (user && user.is_verified) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "This mobile or email is already registered and verified." 
-            });
+            return res.status(400).json({ success: false, message: "User already exists and is verified." });
         }
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -51,7 +45,6 @@ exports.signupUser = async (req, res) => {
         if (user) {
             user.first_name = first_name;
             user.last_name = last_name || "";
-            user.email = cleanEmail;
             user.password = password; 
             user.otp = otp;
             user.otp_expires = otpExpires;
@@ -62,61 +55,46 @@ exports.signupUser = async (req, res) => {
                 email: cleanEmail,
                 mobile_number: cleanMobile,
                 password,
-                user_type: 3, // Default to User
+                user_type: 3,
                 is_verified: false,
                 otp,
                 otp_expires: otpExpires
             });
         }
 
+        // Save User to Database
         await user.save();
         
-        await transporter.sendMail({
-            from: process.env.MAIL_FROM,
-            to: cleanEmail,
-            subject: "Verify Your Account - STM Club",
-            html: `<div style="font-family:sans-serif; padding:20px; border:1px solid #eee; border-radius:10px;">
-                    <h2 style="color:#7c3aed;">Verification Code</h2>
-                    <p>Welcome to STM Club. Use the code below to verify your account:</p>
-                    <h1 style="background:#f3f4f6; padding:10px; text-align:center; letter-spacing:5px;">${otp}</h1>
-                    <p style="color:#666;">This code is valid for 10 minutes.</p>
-                   </div>`
+        // 🎯 SAFETY: Wrap email in separate catch so SMTP failure won't crash signup
+        try {
+            await transporter.sendMail({
+                from: process.env.MAIL_FROM,
+                to: cleanEmail,
+                subject: "Verify Your Account - STM Club",
+                html: `<div style="font-family:sans-serif; padding:20px; border:1px solid #eee; border-radius:10px;">
+                        <h2 style="color:#7c3aed;">Verification Code</h2>
+                        <h1 style="background:#f3f4f6; padding:10px; text-align:center; letter-spacing:5px;">${otp}</h1>
+                        <p>Valid for 10 minutes.</p>
+                       </div>`
+            });
+            console.log(`✅ OTP sent to ${cleanEmail}`);
+        } catch (mailError) {
+            console.error("❌ NODEMAILER ERROR:", mailError.message);
+            console.log(`👉 DEBUG OTP: ${otp}`);
+        }
+
+        res.status(200).json({ 
+            success: true, 
+            message: "OTP generated successfully. Check your email." 
         });
 
-        res.status(200).json({ success: true, message: "Code sent to your email." });
     } catch (error) {
+        console.error("🔥 BACKEND SIGNUP CRASH:", error.message);
         res.status(500).json({ success: false, message: error.message });
     }
 };
 
-// --- STEP 2: RESEND OTP ---
-exports.resendOtp = async (req, res) => {
-    try {
-        const { mobile_number } = req.body;
-        if (!mobile_number) return res.status(400).json({ success: false, message: "Mobile number is required." });
-
-        const user = await User.findOne({ mobile_number: mobile_number.trim() });
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-        const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
-        user.otp = newOtp;
-        user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
-        await user.save();
-
-        await transporter.sendMail({
-            from: process.env.MAIL_FROM,
-            to: user.email,
-            subject: "New Verification Code - STM Club",
-            html: `<h1>${newOtp}</h1><p>Your new code is valid for 10 minutes.</p>`
-        });
-
-        res.status(200).json({ success: true, message: "New code sent to your email." });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// --- STEP 3: VERIFY OTP ---
+// --- 3. VERIFY OTP ---
 exports.verifyOtp = async (req, res) => {
     try {
         const { mobile_number, otp } = req.body;
@@ -125,7 +103,7 @@ exports.verifyOtp = async (req, res) => {
         const user = await User.findOne({ mobile_number: mobile_number.trim(), otp });
 
         if (!user) return res.status(400).json({ success: false, message: "Invalid verification code." });
-        if (new Date() > user.otp_expires) return res.status(400).json({ success: false, message: "Code expired. Please resend." });
+        if (new Date() > user.otp_expires) return res.status(400).json({ success: false, message: "Code expired." });
 
         user.is_verified = true;
         user.otp = null; 
@@ -138,15 +116,40 @@ exports.verifyOtp = async (req, res) => {
     }
 };
 
-// --- STEP 4: LOGIN (Updated with Redirect logic) --- 
+// --- 4. RESEND OTP ---
+exports.resendOtp = async (req, res) => {
+    try {
+        const { mobile_number } = req.body;
+        const user = await User.findOne({ mobile_number: mobile_number.trim() });
+        if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+        const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
+        user.otp = newOtp;
+        user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
+        await user.save();
+
+        try {
+            await transporter.sendMail({
+                from: process.env.MAIL_FROM,
+                to: user.email,
+                subject: "New Verification Code",
+                html: `<h1>${newOtp}</h1>`
+            });
+        } catch (err) { console.log("Resend Mail Error", err.message); }
+
+        res.status(200).json({ success: true, message: "New code sent." });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+// --- 5. LOGIN ---
 exports.loginUser = async (req, res) => {
     try {
         const { mobile, password } = req.body;
-        const cleanMobile = mobile ? mobile.trim() : "";
+        const user = await User.findOne({ mobile_number: mobile?.trim() });
 
-        const user = await User.findOne({ mobile_number: cleanMobile });
-
-        if (!user) return res.status(401).json({ success: false, message: "User not found. Please register." });
+        if (!user) return res.status(401).json({ success: false, message: "User not found." });
         if (!user.is_verified) return res.status(401).json({ success: false, message: "Account unverified." });
 
         const isMatch = await user.matchPassword(password);
@@ -154,8 +157,7 @@ exports.loginUser = async (req, res) => {
 
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" });
         
-        // Define redirect paths based on the role assigned by Schema hooks
-        let redirectPath = "/user/dashboard";
+        let redirectPath = "/";
         if (user.role === 'admin') redirectPath = "/admin/dashboard";
         if (user.role === 'temple-admin') redirectPath = "/temple/dashboard";
 
@@ -174,7 +176,7 @@ exports.loginUser = async (req, res) => {
     }
 };
 
-// --- STEP 5: PROFILE MANAGEMENT ---
+// --- 6. PROFILE MANAGEMENT ---
 exports.getProfile = async (req, res) => {
     try {
         const user = await User.findById(req.user.id).select("-password"); 
@@ -187,7 +189,6 @@ exports.getProfile = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
     try {
-        const userId = req.user.id; 
         const { first_name, last_name, mobile } = req.body;
         const updateData = {};
         
@@ -200,19 +201,17 @@ exports.updateProfile = async (req, res) => {
             if (req.files['bannerImage']) updateData.banner_image = req.files['bannerImage'][0].path;
         }
 
-        const updatedUser = await User.findByIdAndUpdate(userId, { $set: updateData }, { new: true }).select("-password");
+        const updatedUser = await User.findByIdAndUpdate(req.user.id, { $set: updateData }, { new: true }).select("-password");
         res.status(200).json({ success: true, message: "Profile updated", user: updatedUser });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 };
 
-// --- STEP 6: PASSWORD RECOVERY ---
+// --- 7. PASSWORD RECOVERY ---
 exports.forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
-        if (!email) return res.status(400).json({ success: false, message: "Email is required." });
-
         const user = await User.findOne({ email: email.toLowerCase().trim() });
         if (!user) return res.status(404).json({ success: false, message: "Email not found." });
 
@@ -249,7 +248,7 @@ exports.resetPassword = async (req, res) => {
     }
 };
 
-// --- STEP 7: ADMIN CRUD OPS ---
+// --- 8. ADMIN CRUD OPS ---
 exports.getAllUsers = async (req, res) => {
     try {
         const users = await User.find().sort({ created_at: -1 }).select("-password");
@@ -268,6 +267,19 @@ exports.getUserById = async (req, res) => {
     }
 };
 
+exports.updateUser = async (req, res) => {
+    try {
+        const updatedUser = await User.findByIdAndUpdate(
+            req.params.id,
+            { $set: req.body },
+            { new: true, runValidators: true }
+        ).select("-password");
+        res.status(200).json({ success: true, message: "User Updated!", data: updatedUser });
+    } catch (error) {
+        res.status(400).json({ success: false, message: error.message });
+    }
+};
+
 exports.deleteUser = async (req, res) => {
     try {
         await User.findByIdAndDelete(req.params.id);
@@ -277,7 +289,7 @@ exports.deleteUser = async (req, res) => {
     }
 };
 
-// --- STEP 8: SQL DATA FETCHING ---
+// --- 9. SQL DATA FETCHING ---
 exports.getAllRituals = async (req, res) => {
     try {
         const [rows] = await db.execute("SELECT * FROM rituals WHERE status = 'active' OR status = '1'");
@@ -306,18 +318,5 @@ exports.getAssistantsByTemple = async (req, res) => {
     }
 };
 
-exports.bookRitual = async (req, res) => {
-    try {
-        res.status(200).json({ success: true, message: "Booking received!" });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-exports.purchaseMembership = async (req, res) => {
-    try {
-        res.status(200).json({ success: true, message: "Purchase successful!" });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
+exports.bookRitual = async (req, res) => res.status(200).json({ success: true, message: "Booking received!" });
+exports.purchaseMembership = async (req, res) => res.status(200).json({ success: true, message: "Purchase successful!" });

@@ -4,6 +4,7 @@ const path = require('path');
 
 /**
  * Helper to ensure storage directories exist
+ * This prevents "no such file or directory" errors during PDF generation.
  */
 const ensureDirectory = (dirPath) => {
     if (!fs.existsSync(dirPath)) {
@@ -13,12 +14,10 @@ const ensureDirectory = (dirPath) => {
 
 /**
  * 1. Generates a Premium Membership Certificate (Landscape)
- * @param {Object} memberData - The purchased card details from MongoDB
- * @param {Object} userData - The user document
+ * Layout optimized for gold-on-navy premium branding.
  */
 exports.generateMembershipCertificate = async (memberData, userData) => {
     return new Promise((resolve, reject) => {
-        // Landscape layout for a premium certificate feel
         const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0 });
         const fileName = `Membership-${memberData._id}.pdf`;
         const certsDir = path.join(__dirname, '../../public/memberships');
@@ -29,14 +28,11 @@ exports.generateMembershipCertificate = async (memberData, userData) => {
         const stream = fs.createWriteStream(filePath);
         doc.pipe(stream);
 
-        // --- VISUAL BRANDING ---
-        // Dark Navy Background
+        // Visual Branding: Navy Background & Gold Border
         doc.rect(0, 0, 842, 595).fill('#0f172a'); 
-        // Gold Decorative Border
         doc.rect(25, 25, 792, 545).lineWidth(3).stroke('#fbbf24');
         doc.rect(35, 35, 772, 525).lineWidth(1).stroke('#fbbf24');
 
-        // --- CONTENT ---
         doc.fillColor('#fbbf24')
            .fontSize(45)
            .text('CERTIFICATE OF MEMBERSHIP', 0, 110, { align: 'center', characterSpacing: 2 });
@@ -64,7 +60,6 @@ exports.generateMembershipCertificate = async (memberData, userData) => {
         doc.text(`Issued on: ${new Date(memberData.start_date).toDateString()}`, 0, 435, { align: 'center' });
         doc.text(`Valid Until: ${new Date(memberData.end_date).toDateString()}`, 0, 460, { align: 'center' });
 
-        // Footer
         doc.fontSize(10)
            .fillColor('#fbbf24')
            .text('A 99-YEAR SPIRITUAL LEGACY', 0, 530, { align: 'center', characterSpacing: 3 });
@@ -77,86 +72,149 @@ exports.generateMembershipCertificate = async (memberData, userData) => {
 
 /**
  * 2. Generates a branded PDF ticket for temple bookings (Portrait)
- * @param {Object} booking - The populated booking document
+ * Includes instructions and branding for temple assistants.
  */
 exports.generateTempleTicket = async (booking) => {
     return new Promise((resolve, reject) => {
-        const doc = new PDFDocument({ 
-            size: 'A4', 
-            margin: 50,
-            info: { Title: `Ticket-${booking.booking_id}`, Author: 'STM Club' }
-        });
-
+        const doc = new PDFDocument({ size: 'A4', margin: 50 });
         const fileName = `Ticket-${booking.booking_id}.pdf`;
         const ticketsDir = path.join(__dirname, '../../public/tickets');
-        const filePath = path.join(ticketsDir, fileName);
-
         ensureDirectory(ticketsDir);
+
+        const stream = fs.createWriteStream(path.join(ticketsDir, fileName));
+        doc.pipe(stream);
+
+        // Header: Purple Brand Color
+        doc.rect(0, 0, 612, 120).fill('#7c3aed');
+        doc.fillColor('#ffffff').fontSize(24).text('SACRED VISIT TICKET', 50, 40);
+        doc.fontSize(11).text('SARVATIRTHAMAYI CLUB - Your Spiritual Assistant', 50, 75);
+
+        // Body Content
+        doc.moveDown(6).fillColor('#7c3aed').fontSize(16).text('TEMPLE DETAILS');
+        doc.fillColor('#000000').fontSize(14).text(`${booking.temple_id?.name || 'Sacred Temple'}`);
+        doc.fontSize(10).fillColor('#64748b').text(`${booking.temple_id?.location || 'India'}`);
+
+        const startY = doc.y + 30;
+        doc.fillColor('#1e293b').fontSize(12).text('BOOKING ID:', 50, startY);
+        doc.text(booking.booking_id, 150, startY, { bold: true });
+        doc.text('DEVOTEE:', 50, startY + 25);
+        doc.text(booking.devotees_name, 150, startY + 25);
+        doc.text('VISIT DATE:', 320, startY);
+        doc.text(new Date(booking.date).toDateString(), 420, startY);
+
+        // Instructions Box
+        doc.rect(50, doc.y + 40, 500, 100).lineWidth(1).stroke('#e2e8f0');
+        doc.fontSize(11).fillColor('#7c3aed').text('IMPORTANT:', 70, doc.y + 55);
+        doc.fontSize(10).fillColor('#475569').text('Present this digital ticket at the help desk for guided assistance.', 70, doc.y + 15);
+
+        doc.fontSize(9).fillColor('#94a3b8').text('This is a system-generated document. No signature required.', 0, 780, { align: 'center' });
+
+        doc.end();
+        stream.on('finish', () => resolve(fileName));
+        stream.on('error', (err) => reject(err));
+    });
+};
+
+/**
+ * 3. Generates a branded Receipt for Ritual Bookings (Portrait)
+ * Synced with the Ritual Booking Controller logic.
+ */
+exports.generateRitualReceipt = async (booking) => {
+    return new Promise((resolve, reject) => {
+        const doc = new PDFDocument({ size: 'A4', margin: 50 });
+        const fileName = `RitualReceipt-${booking.booking_id}.pdf`;
+        const ritualsDir = path.join(__dirname, '../../public/rituals');
+        ensureDirectory(ritualsDir);
+
+        const stream = fs.createWriteStream(path.join(ritualsDir, fileName));
+        doc.pipe(stream);
+
+        // Header
+        doc.rect(0, 0, 612, 120).fill('#7c3aed');
+        doc.fillColor('#ffffff').fontSize(24).text('RITUAL CONFIRMATION', 50, 40);
+        doc.fontSize(11).text('SARVATIRTHAMAYI CLUB - Spiritual Facilitation', 50, 75);
+
+        // Body Content
+        doc.moveDown(6).fillColor('#7c3aed').fontSize(16).text('RITUAL DETAILS');
+        doc.fillColor('#000000').fontSize(14).text(`${booking.ritual_id?.name}`);
+        doc.fontSize(11).fillColor('#64748b').text(`At: ${booking.temple_id?.name}, ${booking.temple_id?.city_name || ''}`);
+        
+        const startY = doc.y + 30;
+        doc.fillColor('#1e293b').fontSize(12);
+        
+        // Left Column
+        doc.text('RECEIPT NO:', 50, startY);
+        doc.text(booking.booking_id, 150, startY);
+        doc.text('DEVOTEE:', 50, startY + 25);
+        doc.text(booking.devotees_name, 150, startY + 25);
+        doc.text('CONTACT:', 50, startY + 50);
+        doc.text(booking.whatsapp_number, 150, startY + 50);
+
+        // Right Column (Date & Status)
+        doc.text('DATE:', 350, startY);
+        doc.text(new Date(booking.date).toDateString(), 430, startY);
+        doc.text('STATUS:', 350, startY + 25);
+        doc.text('PAID / CONFIRMED', 430, startY + 25, { characterSpacing: 1 });
+
+        // Total Amount Box
+        doc.rect(50, doc.y + 40, 500, 60).fill('#f8fafc');
+        doc.fillColor('#1e293b').fontSize(14).text('TOTAL PAID:', 70, doc.y - 40);
+        doc.fillColor('#7c3aed').fontSize(20).text(`₹${booking.paid_amount}`, 170, doc.y - 20);
+
+        doc.fontSize(9).fillColor('#94a3b8').text('This document certifies your booking for the aforementioned ritual.', 0, 780, { align: 'center' });
+
+        doc.end();
+        stream.on('finish', () => resolve(fileName));
+        stream.on('error', (err) => reject(err));
+    });
+};
+
+/**
+ * 4. Generates a Leaflet for Vouchers (Social Media / Printing)
+ */
+exports.generateVoucherLeaflet = async (voucher) => {
+    return new Promise((resolve, reject) => {
+        // Square layout for Social Media (Instagram/WhatsApp)
+        const doc = new PDFDocument({ size: [500, 500], margin: 0 });
+        const fileName = `Shareable-${voucher.code}.pdf`;
+        const filePath = path.join(__dirname, '../../public/vouchers', fileName);
+
+        ensureDirectory(path.join(__dirname, '../../public/vouchers'));
 
         const stream = fs.createWriteStream(filePath);
         doc.pipe(stream);
 
-        // --- HEADER ---
-        doc.rect(0, 0, 612, 120).fill('#7c3aed'); // Purple Brand Color
-        
+        // Background
+        doc.rect(0, 0, 500, 500).fill('#7c3aed'); // Brand Purple
+
+        // Inner Border
+        doc.rect(20, 20, 460, 460).lineWidth(2).stroke('#ffffff');
+
+        // Content
         doc.fillColor('#ffffff')
-           .fontSize(24)
-           .text('SACRED VISIT TICKET', 50, 40, { characterSpacing: 1 });
-        
-        doc.fontSize(11)
-           .text('SARVATIRTHAMAYI CLUB - Your Spiritual Assistant', 50, 75);
+           .fontSize(20)
+           .text('SARVATIRTHAMAYI CLUB', 0, 80, { align: 'center' });
 
-        // --- BODY ---
-        doc.fillColor('#1e293b').moveDown(6);
+        doc.fontSize(14)
+           .text('SPECIAL SPIRITUAL OFFER', 0, 110, { align: 'center', characterSpacing: 2 });
 
-        // Temple Info
-        doc.fontSize(16).fillColor('#7c3aed').text('TEMPLE DETAILS');
-        doc.moveDown(0.5);
-        doc.fontSize(14).fillColor('#000000').text(`${booking.temple_id?.name || 'Sacred Temple'}`);
-        doc.fontSize(10).fillColor('#64748b').text(`${booking.temple_id?.location || 'India'}`);
-        
-        doc.moveDown(2);
+        doc.fontSize(60)
+           .text(voucher.discount_type === 'percentage' ? `${voucher.discount_value}% OFF` : `₹${voucher.discount_value} OFF`, 0, 180, { align: 'center', bold: true });
 
-        // Devotee Table
-        const startY = doc.y;
-        doc.fillColor('#1e293b').fontSize(12);
-        
-        // Col 1
-        doc.text('BOOKING ID:', 50, startY);
-        doc.text(booking.booking_id, 150, startY, { bold: true });
-        doc.text('DEVOTEE:', 50, startY + 25);
-        doc.text(booking.devotees_name, 150, startY + 25);
-        
-        // Col 2
-        doc.text('VISIT DATE:', 320, startY);
-        doc.text(new Date(booking.date).toDateString(), 420, startY);
-        doc.text('WHATSAPP:', 320, startY + 25);
-        doc.text(booking.whatsapp_number, 420, startY + 25);
+        // Voucher Code Box
+        doc.rect(100, 280, 300, 60).fill('#ffffff');
+        doc.fillColor('#7c3aed')
+           .fontSize(30)
+           .text(voucher.code, 100, 295, { align: 'center', characterSpacing: 3 });
 
-        doc.moveDown(4);
+        doc.fillColor('#ffffff')
+           .fontSize(12)
+           .text('Use this code during checkout', 0, 360, { align: 'center' });
 
-        // Instructions Box
-        doc.rect(50, doc.y, 500, 120).lineWidth(1).stroke('#e2e8f0');
-        const boxTop = doc.y + 15;
-        doc.fontSize(11).fillColor('#7c3aed').text('IMPORTANT INSTRUCTIONS:', 70, boxTop);
-        
-        doc.fontSize(10).fillColor('#475569');
-        const list = [
-            '• Please arrive at the temple 30 minutes prior to your selected slot.',
-            '• Present this digital ticket at the "Sarvatirthamayi" help desk.',
-            '• Adhere to traditional dress code requirements of the specific temple.',
-            '• Your Spiritual Journey Assistant will guide you through the rituals.'
-        ];
-
-        list.forEach(item => {
-            doc.moveDown(0.5);
-            doc.text(item, 70);
-        });
-
-        // --- FOOTER ---
-        doc.fontSize(9)
-           .fillColor('#94a3b8')
-           .text('This is a computer-generated document. No physical signature required.', 0, 780, { align: 'center' });
+        if (voucher.expiry_date) {
+            doc.fontSize(10)
+               .text(`Valid until: ${new Date(voucher.expiry_date).toDateString()}`, 0, 430, { align: 'center' });
+        }
 
         doc.end();
         stream.on('finish', () => resolve(fileName));

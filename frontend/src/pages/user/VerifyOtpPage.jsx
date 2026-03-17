@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Loader2, ShieldCheck, ArrowLeft } from "lucide-react";
+import api from "../../api/api"; // 🎯 Import your axios instance
 
 export default function VerifyOtpPage() {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
@@ -10,9 +11,11 @@ export default function VerifyOtpPage() {
   
   const navigate = useNavigate();
   const location = useLocation();
-  const emailOrMobile = location.state?.identifier || "your registered device";
 
-  // Countdown timer for Resend OTP
+  // 🎯 Get the mobile number passed from the Signup page
+  const mobile_number = location.state?.mobile || ""; 
+  const displayIdentifier = mobile_number || "your registered device";
+
   useEffect(() => {
     if (timer > 0) {
       const interval = setInterval(() => setTimer((prev) => prev - 1), 1000);
@@ -20,13 +23,9 @@ export default function VerifyOtpPage() {
     }
   }, [timer]);
 
-  // Handle Input Change
   const handleChange = (element, index) => {
-    if (isNaN(element.value)) return false; // Basic Validation: Only numbers
-
+    if (isNaN(element.value)) return false;
     setOtp([...otp.map((d, idx) => (idx === index ? element.value : d))]);
-
-    // Focus next input
     if (element.nextSibling && element.value !== "") {
       element.nextSibling.focus();
     }
@@ -36,7 +35,6 @@ export default function VerifyOtpPage() {
     e.preventDefault();
     const otpCode = otp.join("");
 
-    // Basic Length Validation
     if (otpCode.length < 6) {
       setError("Please enter the full 6-digit code.");
       return;
@@ -46,13 +44,34 @@ export default function VerifyOtpPage() {
     setError("");
 
     try {
-      // Mock API Call - Replace with your authService.verifyOtp(otpCode)
-      console.log("Verifying OTP:", otpCode);
-      
-      // On Success:
-      // navigate("/login"); 
+      // 🎯 ACTUAL API CALL
+      const res = await api.post("/user/verify-otp", {
+        mobile_number: mobile_number,
+        otp: otpCode
+      });
+
+      if (res.data.success) {
+        // Redirect to login on success
+        navigate("/login", { 
+          state: { message: "Account verified! Please login." } 
+        });
+      }
     } catch (err) {
-      setError("Invalid OTP. Please try again.");
+      setError(err.response?.data?.message || "Invalid OTP. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    try {
+      setLoading(true);
+      await api.post("/user/resend-otp", { mobile_number });
+      setTimer(30);
+      setError("");
+      alert("New OTP sent!");
+    } catch (err) {
+      setError("Failed to resend OTP.");
     } finally {
       setLoading(false);
     }
@@ -74,7 +93,7 @@ export default function VerifyOtpPage() {
           </div>
           <h2 className="text-2xl font-bold text-gray-900">Verify OTP</h2>
           <p className="text-gray-500 text-sm mt-2">
-            We sent a code to <span className="font-semibold text-gray-700">{emailOrMobile}</span>
+            We sent a code to <span className="font-semibold text-gray-700">{displayIdentifier}</span>
           </p>
         </div>
 
@@ -115,7 +134,7 @@ export default function VerifyOtpPage() {
               <span className="text-indigo-600 font-semibold">Resend in {timer}s</span>
             ) : (
               <button 
-                onClick={() => setTimer(30)} 
+                onClick={handleResend} 
                 className="text-indigo-600 font-bold hover:underline"
               >
                 Resend Now

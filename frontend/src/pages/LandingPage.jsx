@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Element } from "react-scroll";
@@ -7,7 +7,7 @@ import api from "../api/api";
 
 import { 
   ShieldCheck, ArrowRight, Eye, Target, 
-  CreditCard, Sparkles, CheckCircle2 
+  CreditCard, Sparkles, CheckCircle2, Crown, Gift 
 } from "lucide-react";
 
 import Navbar from "../components/Navbar";
@@ -23,18 +23,23 @@ export default function LandingPage() {
   const [plans, setPlans] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
 
+  // 1. Fetch Plans from the NEW Public Endpoint
   useEffect(() => {
     const fetchPlans = async () => {
       try {
-        const res = await api.get("/admin/memberships/active");
-        if (res.data.success) setPlans(res.data.data);
+        // Updated from /admin/... to /user/... to resolve 403 Forbidden
+        const res = await api.get("/user/membership-plans/active");
+        if (res.data.success) {
+          setPlans(res.data.data);
+        }
       } catch (err) {
-        console.error("Failed to fetch plans", err);
+        console.error("LandingPage: Failed to fetch plans", err);
       }
     };
     fetchPlans();
   }, []);
 
+  // 2. Plan Carousel Auto-Timer
   useEffect(() => {
     if (plans.length > 1) {
       const timer = setInterval(() => {
@@ -111,7 +116,7 @@ export default function LandingPage() {
             <SectionDivider />
             <div className="space-y-8 text-lg text-slate-600 dark:text-slate-400">
               <p className="leading-relaxed font-medium">
-                Sarvatirthamayi is more than a platform; it's a movement to reconnect the modern world with ancient spiritual heritage. 
+                Sarvatirthamayi is more than a platform; it's a movement to reconnect the modern world with ancient spiritual heritage through transparent digital connectivity.
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {["Temple Culture", "Digital Connectivity", "Heritage Security", "Vedic Authenticity"].map((item, i) => (
@@ -142,47 +147,57 @@ export default function LandingPage() {
         </div>
       </Element>
 
-      {/* --- MEMBERSHIP SECTION --- */}
+      {/* --- MEMBERSHIP (STM CLUB) SECTION --- */}
       <section className="py-24 px-6 bg-white dark:bg-slate-950">
         <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center bg-slate-900 dark:bg-indigo-950 rounded-[3rem] p-12 md:p-20 shadow-3xl relative overflow-hidden">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center bg-slate-900 dark:bg-indigo-950 rounded-[4rem] p-12 md:p-20 shadow-3xl relative overflow-hidden">
             <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-500/10 blur-[120px] rounded-full" />
             
-            <div className="lg:col-span-7 space-y-6">
-              <span className="text-amber-400 font-bold uppercase tracking-widest text-xs">Premium Access</span>
-              <h2 className="text-4xl md:text-6xl font-serif font-bold text-white leading-tight">The STM Club</h2>
-              <p className="text-indigo-100/60 text-lg max-w-lg">
-                Gain priority access to annual visits, personalized pooja services, and exclusive membership rewards.
+            <div className="lg:col-span-7 space-y-8">
+              <div className="flex items-center gap-3">
+                <Crown className="text-amber-400" size={24} />
+                <span className="text-amber-400 font-black uppercase tracking-[0.3em] text-[10px]">Premium Access</span>
+              </div>
+              <h2 className="text-4xl md:text-6xl font-serif font-bold text-white leading-tight italic">The STM Club</h2>
+              <p className="text-indigo-100/60 text-lg max-w-lg leading-relaxed font-medium">
+                Join the sovereign inner circle. Gain priority access to annual visits, personalized pooja services, and exclusive member-only vouchers.
               </p>
-              <button onClick={handleSTMClubClick} className="px-10 py-4 bg-white text-indigo-900 font-black rounded-xl uppercase text-xs tracking-widest hover:bg-amber-400 transition-colors shadow-lg shadow-black/20">
-                {user?.isActive ? "View My Dashboard" : "Get Started Now"}
-              </button>
+              <div className="flex flex-wrap gap-4 pt-4">
+                <button onClick={handleSTMClubClick} className="px-10 py-5 bg-white text-indigo-900 font-black rounded-2xl uppercase text-[10px] tracking-widest hover:bg-amber-400 transition-all shadow-xl">
+                  {user?.membership === "active" ? "My Membership Dashboard" : "Become a Sovereign Member"}
+                </button>
+              </div>
             </div>
 
-            <div className="lg:col-span-5 relative h-[400px] flex items-center justify-center">
+            <div className="lg:col-span-5 relative h-[450px] flex items-center justify-center">
               <AnimatePresence mode="wait">
-                <motion.div
-                  key={currentIndex}
-                  initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 1.1, y: -20 }}
-                  className="w-full max-w-sm p-10 rounded-[2.5rem] bg-white/5 backdrop-blur-2xl border border-white/10 text-center shadow-2xl"
-                >
-                  <Sparkles className="text-amber-400 mx-auto mb-6" size={32} />
-                  <h4 className="text-white/60 font-bold uppercase tracking-widest text-[10px] mb-2 tracking-[0.3em]">
-                    {plans[currentIndex]?.name}
-                  </h4>
-                  <div className="text-5xl font-black text-white mb-4 font-serif italic tracking-tighter">
-                    ₹{plans[currentIndex]?.price.toLocaleString()}
-                  </div>
-                  <p className="text-amber-400 text-xs font-bold uppercase mb-8 tracking-widest">
-                    {plans[currentIndex]?.visits} Sacred Visits
-                  </p>
-                  <div className="h-[2px] w-12 bg-amber-500/50 mx-auto mb-8" />
-                  <button onClick={handleSTMClubClick} className="text-white text-[10px] font-black uppercase tracking-widest border-b border-white/30 hover:border-white transition-all pb-1">
-                    Membership Details
-                  </button>
-                </motion.div>
+                {plans.length > 0 ? (
+                  <motion.div
+                    key={currentIndex}
+                    initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 1.1, y: -20 }}
+                    className="w-full max-w-sm p-12 rounded-[3rem] bg-white/5 backdrop-blur-3xl border border-white/10 text-center shadow-2xl relative overflow-hidden group"
+                  >
+                    <div className="absolute -top-10 -right-10 w-32 h-32 bg-amber-400/10 blur-3xl rounded-full group-hover:bg-amber-400/20 transition-colors" />
+                    <Sparkles className="text-amber-400 mx-auto mb-6" size={36} />
+                    <h4 className="text-white/60 font-black uppercase tracking-[0.4em] text-[10px] mb-3">
+                      {plans[currentIndex]?.name}
+                    </h4>
+                    <div className="text-6xl font-black text-white mb-6 font-serif italic tracking-tighter">
+                      ₹{plans[currentIndex]?.price.toLocaleString()}
+                    </div>
+                    <div className="flex items-center justify-center gap-2 text-amber-400 text-xs font-black uppercase mb-10 tracking-[0.1em]">
+                      <Gift size={14} /> {plans[currentIndex]?.visits} Sacred Visits Included
+                    </div>
+                    <div className="h-[1px] w-16 bg-white/20 mx-auto mb-10" />
+                    <button onClick={handleSTMClubClick} className="text-white text-[10px] font-black uppercase tracking-[0.2em] border-b-2 border-amber-400/30 hover:border-amber-400 transition-all pb-2">
+                      View Plan Benefits
+                    </button>
+                  </motion.div>
+                ) : (
+                  <div className="text-indigo-100/20 font-black uppercase tracking-widest animate-pulse">Loading Plans...</div>
+                )}
               </AnimatePresence>
             </div>
           </div>
@@ -196,16 +211,16 @@ export default function LandingPage() {
           <SectionDivider />
           
           <div className="mt-16 max-w-lg mx-auto group">
-            <div className="relative rounded-[3rem] overflow-hidden shadow-2xl cursor-pointer">
-              <img src={sankalpImg} alt="Sankalp" className="w-full h-[450px] object-cover group-hover:scale-110 transition-transform duration-1000" />
+            <div className="relative rounded-[3.5rem] overflow-hidden shadow-2xl cursor-pointer">
+              <img src={sankalpImg} alt="Sankalp" className="w-full h-[500px] object-cover group-hover:scale-110 transition-transform duration-1000" />
               <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-900/40 to-transparent opacity-90" />
               
-              <div className="absolute bottom-10 left-10 right-10 text-left">
-                <span className="bg-amber-500 text-white px-4 py-1 rounded-full text-[10px] font-black uppercase mb-4 inline-block tracking-widest">Featured Service</span>
-                <h3 className="text-3xl font-serif font-bold text-white mb-2">Sankalp Pooja</h3>
-                <p className="text-white/70 text-sm mb-6 leading-relaxed">Personalized rituals performed in your name at powerful energy centers across India.</p>
-                <button onClick={() => navigate('/user/rituals')} className="flex items-center gap-2 text-amber-400 font-bold uppercase text-xs tracking-widest group-hover:gap-4 transition-all">
-                  Book Your Ritual <ArrowRight size={18} />
+              <div className="absolute bottom-12 left-12 right-12 text-left">
+                <span className="bg-amber-500 text-white px-5 py-1.5 rounded-full text-[10px] font-black uppercase mb-5 inline-block tracking-[0.2em]">Featured Service</span>
+                <h3 className="text-4xl font-serif font-bold text-white mb-3 italic">Sankalp Pooja</h3>
+                <p className="text-white/70 text-sm mb-8 leading-relaxed font-medium">Personalized rituals performed in your name at powerful energy centers across India with digital evidence.</p>
+                <button onClick={() => navigate('/user/rituals')} className="flex items-center gap-3 text-amber-400 font-black uppercase text-[10px] tracking-[0.2em] group-hover:gap-5 transition-all">
+                  Book Your Ritual <ArrowRight size={20} />
                 </button>
               </div>
             </div>
@@ -219,12 +234,15 @@ export default function LandingPage() {
 // Helper Components
 function VisionCard({ icon, title, desc, color, border }) {
   return (
-    <div className={`p-10 rounded-[2.5rem] shadow-xl transition-all hover:-translate-y-2 hover:shadow-2xl ${color} ${border ? 'border-2 border-indigo-100 dark:border-slate-700' : 'text-white'}`}>
-      <div className={`${border ? 'text-indigo-600' : 'text-white'} mb-6`}>
-        {React.cloneElement(icon, { size: 32 })}
+    <motion.div 
+      whileHover={{ y: -5 }}
+      className={`p-12 rounded-[3rem] shadow-xl transition-all hover:shadow-2xl ${color} ${border ? 'border-2 border-indigo-100 dark:border-slate-800' : 'text-white'}`}
+    >
+      <div className={`${border ? 'text-indigo-600' : 'text-white'} mb-8`}>
+        {React.cloneElement(icon, { size: 40 })}
       </div>
-      <h3 className={`text-2xl font-bold mb-4 font-serif ${border ? 'text-slate-900 dark:text-white' : ''}`}>{title}</h3>
-      <p className={`leading-relaxed text-sm ${border ? 'text-slate-500 dark:text-slate-400' : 'text-indigo-100'}`}>{desc}</p>
-    </div>
+      <h3 className={`text-3xl font-bold mb-5 font-serif italic ${border ? 'text-slate-900 dark:text-white' : ''}`}>{title}</h3>
+      <p className={`leading-relaxed text-sm font-medium ${border ? 'text-slate-500 dark:text-slate-400' : 'text-indigo-100/80'}`}>{desc}</p>
+    </motion.div>
   );
 }

@@ -3,159 +3,112 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 
-// Middlewares
-const { protectAdmin } = require("../middleware/authMiddleware");
+// 🛡️ Middlewares
+const { protect, adminOnly } = require("../middleware/authMiddleware");
 
-// Controllers (Object Style)
+// 🎮 Controller Imports
 const dashboardController = require("../controllers/dashboardController");
-const stateController = require("../controllers/stateController");
 const cityController = require('../controllers/cityController');
 const countryController = require('../controllers/countryController');
 const authController = require("../controllers/auth.controller");
-const userController = require("../controllers/userController");
+
+/**
+ * 🎯 FIX 1: Corrected path for userController
+ * Based on your folder structure: D:\stm-mern\backend\controllers\user\userController.js
+ */
+//const userController = require("../controllers/user/userController");
+
 const ritualTypeController = require("../controllers/ritualTypeController");
 const ritualBookingController = require("../controllers/ritualBookingController");
 const ritualPackageController = require("../controllers/ritualPackageController");
 const purchasedCardAdminController = require("../controllers/purchasedCardController");
-// Controllers (Destructured Style)
-const { 
-  getAdminTempleList, 
-  getTempleById,
-  getTempleBySqlId, 
-  createTemple, 
-  updateTemple, 
-  deleteTemple,
-  getStates,           // Re-enabled for data consistency
-  getCitiesByState     // New: For dependent dropdowns
-} = require('../controllers/templeController');
-
-const { 
-  getAllTempleBookings, 
-  getTempleBookingById,
-  updateTempleBookingStatus,
-  //createTempleBooking 
-} = require("../controllers/templeBookingController");
-
-const {
-  getAllMemberships,
-  getMembershipById,
-  getTemplesList,
-  getActiveMemberships,
-  createMembership,
-  updateMembership,
-  deleteMembership
-} = require("../controllers/membershipController");
-
-const { 
-  getDonations, 
-  getDonationById, 
-  createDonation, 
-  updateDonation, 
-  deleteDonation 
-} = require("../controllers/donationController");
-
-const { 
-  getRituals,
-  getRitualById, 
-  createRitual, 
-  updateRitual,
-  getRitualTypes,
-  deleteRitual 
-} = require("../controllers/ritualController");
-
-const { createAdmin } = require("../controllers/adminController");
-const { sendOtp, resetPassword } = require("../controllers/forgotPassword.controller");
+const voucherController = require("../controllers/voucherController");
+const templeController = require('../controllers/templeController');
+const templeBookingController = require("../controllers/templeBookingController");
+const membershipController = require("../controllers/membershipController");
+const donationController = require("../controllers/donationController");
+const ritualController = require("../controllers/ritualController");
+const adminController = require("../controllers/adminController");
+const forgotPasswordController = require("../controllers/forgotPassword.controller");
+const userController = require("../controllers/userController");
 
 // --- 1. CONFIGURE MULTER STORAGE ---
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
+    destination: (req, file, cb) => { cb(null, 'uploads/'); },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + path.extname(file.originalname));
+    }
 });
 const upload = multer({ storage: storage });
 
-// --- 2. PUBLIC ROUTES ---
+// --- 2. PUBLIC ADMIN ROUTES ---
 router.post("/login", authController.login);
-router.post("/create-admin", createAdmin);
-router.post("/forgot-password", sendOtp);
-router.post("/reset-password", resetPassword);
+router.post("/create-admin", adminController.createAdmin);
+router.post("/forgot-password", forgotPasswordController.sendOtp);
+router.post("/reset-password", forgotPasswordController.resetPassword);
 
-// Shared Metadata Routes
-router.get("/states", getStates); // Using TempleController for migrated data
-router.get("/states/:stateSqlId/cities", getCitiesByState); // NEW: Get cities for a state
+// Shared Metadata
+router.get("/states", templeController.getStates);
+router.get("/states/:stateSqlId/cities", templeController.getCitiesByState);
 router.get('/cities', cityController.getCities);
 router.get('/countries', countryController.getCountries);
 
 // --- 3. PROTECTED ADMIN ROUTES ---
+router.use(protect); 
+//router.use(adminOnly);
 
-// Dashboard
-router.get("/dashboard-stats", protectAdmin, dashboardController.getDashboardStats);
+// --- Dashboard & Global Control ---
+router.get("/dashboard-stats", dashboardController.getDashboardStats);
+router.put("/settings/global-discount", dashboardController.updateGlobalSettings);
 
-// User Management
-router.get("/users", protectAdmin, userController.getAllUsers);
-router.get("/users/:id", protectAdmin, userController.getUserById);
-router.put("/users/update/:id", protectAdmin, userController.updateUser);
-router.delete("/users/:id", protectAdmin, userController.deleteUser);
+// --- User Management ---
+/**
+ * 🎯 FIX 2: These routes will now work because userController is correctly imported above
+ */
+router.get("/users", userController.getAllUsers);
+router.get("/users/:id", userController.getUserById);
+router.put("/users/update/:id", userController.updateUser);
+router.delete("/users/:id", userController.deleteUser);
 
-// Temple Management
-router.get("/temples", protectAdmin, getAdminTempleList);
-router.get("/temples/sql/:sqlId", protectAdmin, getTempleBySqlId);
-router.get("/temples/:id", protectAdmin, getTempleById);
-router.post("/temples/create", protectAdmin, upload.single('image'), createTemple);
-router.put("/temples/update/:id", protectAdmin, upload.single('image'), updateTemple);
-router.delete("/temples/:id", protectAdmin, deleteTemple);
+// --- Temple Management ---
+router.get("/temples", templeController.getAdminTempleList);
+router.get("/temples/:id", templeController.getTempleById);
+router.post("/temples/create", upload.single('image'), templeController.createTemple);
+router.put("/temples/update/:id", upload.single('image'), templeController.updateTemple);
+router.delete("/temples/:id", templeController.deleteTemple);
 
-// Temple Bookings
-router.get("/temple-bookings", protectAdmin, getAllTempleBookings);
-router.get("/temple-bookings/:id", protectAdmin, getTempleBookingById);
-router.put("/temple-bookings/status/:id", protectAdmin, updateTempleBookingStatus);
-//router.post("/temple-bookings", protectAdmin, createTempleBooking);
+// --- Temple Bookings ---
+router.get("/temple-bookings", templeBookingController.getAllTempleBookings);
+router.put("/temple-bookings/status/:id", templeBookingController.updateTempleBookingStatus);
 
-// Membership Management
-router.get("/memberships/temples-list", protectAdmin, getTemplesList);
-router.get("/memberships/active", getActiveMemberships);
-router.get("/memberships", protectAdmin, getAllMemberships);
-router.get("/memberships/:id", protectAdmin, getMembershipById);
-router.post("/memberships/create", protectAdmin, createMembership);
-router.put("/memberships/update/:id", protectAdmin, updateMembership);
-router.delete("/memberships/:id", protectAdmin, deleteMembership);
-router.get("/purchased-memberships", protectAdmin, purchasedCardAdminController.getAllPurchasedCardsAdmin);
-router.get("/purchased-memberships/:id", protectAdmin, purchasedCardAdminController.getPurchasedCardById);
+// --- Membership Management ---
+router.get("/memberships", membershipController.getAllMemberships);
+router.post("/memberships/create", membershipController.createMembership);
+router.put("/memberships/update/:id", membershipController.updateMembership);
+router.delete("/memberships/:id", membershipController.deleteMembership);
+router.get("/purchased-memberships", purchasedCardAdminController.getAllPurchasedCardsAdmin);
 
-// Donations
-router.get("/donations", protectAdmin, getDonations);
-router.get("/donations/:id", protectAdmin, getDonationById);
-router.post("/donations", protectAdmin, upload.single('image'), createDonation);
-router.put("/donations/update/:id", protectAdmin, upload.single('image'), updateDonation);
-router.delete("/donations/:id", protectAdmin, deleteDonation);
+// --- Ritual Management ---
+router.get("/rituals", ritualController.getRituals);
+router.post("/rituals", upload.single('image'), ritualController.createRitual);
+router.put("/rituals/update/:id", upload.single('image'), ritualController.updateRitual);
+router.delete("/rituals/:id", ritualController.deleteRitual); 
 
-// Rituals
-router.get("/rituals", protectAdmin, getRituals);
-router.get("/ritual-types", protectAdmin, getRitualTypes);
-router.get("/rituals/:id", protectAdmin, getRitualById); 
-router.post("/rituals", protectAdmin, upload.single('image'), createRitual);
-router.put("/rituals/update/:id", protectAdmin, upload.single('image'), updateRitual);
-router.delete("/rituals/:id", protectAdmin, deleteRitual); 
+// --- Ritual Metadata ---
+router.get("/ritual-types", ritualTypeController.getRitualTypes);
+router.post("/ritual-types", ritualTypeController.createRitualType);
+router.get("/ritual-packages", ritualPackageController.getRitualPackages);
+router.post("/ritual-packages", ritualPackageController.createRitualPackage);
 
-// Ritual Types
-router.get("/ritual-types", protectAdmin, ritualTypeController.getRitualTypes);
-router.get("/ritual-types/:id", protectAdmin, ritualTypeController.getRitualTypeById);
-router.post("/ritual-types", protectAdmin, ritualTypeController.createRitualType);
-router.put("/ritual-types/:id", protectAdmin, ritualTypeController.updateRitualType);
-router.delete("/ritual-types/:id", protectAdmin, ritualTypeController.deleteRitualType);
+// --- Ritual Bookings ---
+router.get("/ritual-bookings", ritualBookingController.getAllRitualBookings);
+router.get("/ritual-bookings/:id", ritualBookingController.getRitualBookingById);
 
-// Ritual Bookings
-router.get("/ritual-bookings", protectAdmin, ritualBookingController.getAllRitualBookings);
-router.get("/ritual-bookings/:id", protectAdmin, ritualBookingController.getRitualBookingById);
-
-// Ritual Packages
-router.get("/ritual-packages", protectAdmin, ritualPackageController.getRitualPackages);
-router.post("/ritual-packages", protectAdmin, ritualPackageController.createRitualPackage);
-router.delete("/ritual-packages/:id", protectAdmin, ritualPackageController.deleteRitualPackage);
-router.get("/ritual-packages/:id", protectAdmin, ritualPackageController.getRitualPackageById);
-router.put("/ritual-packages/:id", protectAdmin, ritualPackageController.updateRitualPackage);
+// --- Vouchers & Coupons ---
+router.get("/vouchers", voucherController.getVouchers);
+router.post("/vouchers/create", voucherController.createVoucher);
+router.put("/vouchers/update/:id", voucherController.updateVoucher);
+router.delete("/vouchers/:id", voucherController.deleteVoucher);
+router.get("/vouchers/download/:id", voucherController.downloadVoucherLeaflet);
 
 module.exports = router;

@@ -5,7 +5,7 @@ import api from '../api/api';
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  // --- 1. INITIAL STATE (Hydrate from LocalStorage) ---
+  // --- 1. INITIAL STATE ---
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem('user');
     try {
@@ -16,13 +16,9 @@ export const AuthProvider = ({ children }) => {
   });
 
   const [loading, setLoading] = useState(true);
+  const [dark, setDark] = useState(() => localStorage.getItem('theme') === 'dark');
 
-  // --- 2. DARK MODE LOGIC ---
-  const [dark, setDark] = useState(() => {
-    const savedTheme = localStorage.getItem('theme');
-    return savedTheme === 'dark';
-  });
-
+  // --- 2. THEME EFFECT ---
   useEffect(() => {
     const root = window.document.documentElement;
     if (dark) {
@@ -34,25 +30,10 @@ export const AuthProvider = ({ children }) => {
     }
   }, [dark]);
 
-  // --- 3. CROSS-TAB SESSION SYNC ---
-  useEffect(() => {
-    const syncSession = (e) => {
-      if (e.key === 'user' || e.key === 'token') {
-        if (!e.newValue) {
-          setUser(null); // Someone logged out in another tab
-        } else {
-          window.location.reload(); // Re-sync state
-        }
-      }
-    };
-    window.addEventListener('storage', syncSession);
-    return () => window.removeEventListener('storage', syncSession);
-  }, []);
-
-  // --- 4. INITIAL AUTH VALIDATION (The "Redirect Fix") ---
+  // --- 3. SESSION VALIDATION ---
   useEffect(() => {
     const initAuth = async () => {
-      const token = localStorage.getItem('token');
+      const token = authService.getToken();
       
       if (!token) {
         setUser(null);
@@ -61,21 +42,24 @@ export const AuthProvider = ({ children }) => {
       }
 
       try {
-        // FIX: Always use the unified admin auth check route for admins
-        // This ensures the sidebar doesn't redirect on route changes
-        const res = await api.get('/admin/auth/check-auth'); 
+        /**
+         * 🎯 FIX: Match the actual property from your User model (user_type)
+         * If type is 1 (Admin) or 2 (Temple), use the admin route.
+         */
+        const isAdmin = user?.user_type === 1 || user?.user_type === 2 || user?.role === 'admin';
+        const checkPath = isAdmin ? '/admin/profile' : '/user/profile';
+
+        const res = await api.get(checkPath); 
 
         if (res.data.success) {
-          setUser(res.data.user);
-          localStorage.setItem('user', JSON.stringify(res.data.user));
+          const userData = res.data.user || res.data.data;
+          setUser(userData);
+          localStorage.setItem('user', JSON.stringify(userData));
         }
       } catch (err) {
-        console.error("Session validation failed:", err);
-        // Only wipe session if the server says the token is actually 401 (Expired)
+        console.error("Session invalid:", err.message);
         if (err.response?.status === 401) {
-          setUser(null);
-          localStorage.removeItem('user');
-          localStorage.removeItem('token');
+          logout(); // 🎯 Wipe local data if token expired
         }
       } finally {
         setLoading(false);
@@ -85,10 +69,11 @@ export const AuthProvider = ({ children }) => {
     initAuth();
   }, []);
 
-  // --- 5. LOGIN HANDLER ---
+  // --- 4. LOGIN HANDLER ---
   const login = async (credentials) => {
     try {
       let response;
+      // Handle User vs Admin login based on input fields
       if (credentials.mobile) {
         response = await authService.userLogin(credentials.mobile, credentials.password);
       } else {
@@ -96,23 +81,28 @@ export const AuthProvider = ({ children }) => {
       }
 
       if (response.success) {
-        // authService.setSession handles localStorage
-        authService.setSession(response);
-        setUser(response.user);
-        return response;
+        // 🎯 CRITICAL: authService.setSession handles localStorage.setItem('token', ...)
+        authService.setSession(response); 
+        
+        const userData = response.user || response.data;
+        setUser(userData);
+        localStorage.setItem('user', JSON.stringify(userData));
+        
+        return response; // 🎯 Ensure response is returned to the UI for navigate()
       } else {
         throw new Error(response.message || "Login failed");
       }
     } catch (error) {
-      const errorMsg = error.response?.data?.message || error.message || "Login failed";
-      throw errorMsg;
+      // Re-throw so the UI (UserLogin.jsx) can catch and show the error message
+      throw error; 
     }
   };
 
-  // --- 6. LOGOUT HANDLER ---
+  // --- 5. LOGOUT HANDLER ---
   const logout = () => {
-    authService.logout(); // Clears cookies and localStorage
+    authService.logout(); // Removes token and user from localStorage
     setUser(null);
+    localStorage.removeItem('user');
   };
 
   const value = useMemo(() => ({
@@ -123,23 +113,23 @@ export const AuthProvider = ({ children }) => {
     loading,
     dark,
     setDark,
-    authenticated: !!user
+    authenticated: !!user 
   }), [user, loading, dark]);
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading ? (
-        children
-      ) : (
-        <div className="h-screen w-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
-          <div className="flex flex-col items-center gap-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-purple-600 border-opacity-50"></div>
-            <p className="text-slate-500 font-medium">Verifying Session...</p>
-          </div>
+      {!loading ? children : (
+        <div className="h-screen w-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950">
+           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600 mb-4"></div>
+           <p className="text-slate-400 font-serif animate-pulse">Entering Sacred Space...</p>
         </div>
       )}
     </AuthContext.Provider>
   );
 };
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
+  return context;
+};

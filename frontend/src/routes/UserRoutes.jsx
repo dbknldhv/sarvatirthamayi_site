@@ -29,7 +29,7 @@ export const UserRoutes = [
     /* Public User Routes */
     <Route key="landing" path="/" element={<LandingPage />} />,
     <Route key="about" path="/about" element={<About />} />,
-    <Route key="login" path="/user/login" element={<UserLogin />} />,
+    <Route key="login" path="/login" element={<UserLogin />} />,
     <Route key="signup" path="/signup" element={<UserSignup />} />,
     <Route key="verify-otp" path="/verify-otp" element={<VerifyOtpPage />} />,
     <Route key="forgot-pass" path="/forgot-password" element={<UserForgotPassword />} />,

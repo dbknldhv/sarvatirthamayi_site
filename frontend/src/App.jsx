@@ -1,6 +1,9 @@
 import React from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+
+
 import Navbar from './components/Navbar';
+import { Toaster } from 'react-hot-toast';
 
 // 👤 User Module Import (The "Baby Stage" isolation)
 import { UserRoutes } from "./routes/UserRoutes";
@@ -11,6 +14,7 @@ import ForgotPassword from "./pages/admin/ForgotPassword";
 import ResetPassword from "./pages/admin/ResetPassword";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Dashboard from "./pages/admin/Dashboard";
+import DashboardHome from "./pages/admin/DashboardHome";
 
 /* Admin Pages - Users */
 import UsersList from "./pages/admin/users/UsersList.jsx";
@@ -68,6 +72,12 @@ import Menu from "./pages/admin/settings/Menu.jsx";
 import Translation from "./pages/admin/settings/Translation.jsx";
 import VedPathShala from "./pages/ved-path-shala/VedaPathShala.jsx";
 
+import VoucherList from "./pages/admin/voucher/VoucherList.jsx";
+import VoucherAdd from "./pages/admin/voucher/VoucherAdd.jsx";
+import VoucherView from "./pages/admin/voucher/VoucherView.jsx";
+import VoucherEdit from "./pages/admin/voucher/VoucherEdit.jsx";
+  
+
 export default function App() {
   const location = useLocation();
 
@@ -102,13 +112,15 @@ export default function App() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<Navigate to="dashboard" replace />} />
+          {/* <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={
             <div className="p-6 bg-white rounded-xl shadow-sm border border-gray-100">
               <h1 className="text-2xl font-bold text-slate-800">Admin Overview</h1>
               <p className="text-slate-500">Welcome back! Manage your system settings here.</p>
             </div>
-          } />
+          } /> */}
+          
+          <Route path="dashboard" element={<DashboardHome />} />
 
           {/* Admin Sub-Routes */}
           <Route path="user/list" element={<UsersList />} />
@@ -146,10 +158,16 @@ export default function App() {
           <Route path="membership-card" element={<MembershipList />} />
           <Route path="purchased-member-card" element={<PurchasedCards />} />
           {/* ADD THIS LINE BELOW */}
-<Route path="purchased-member-card/view/:id" element={<ViewPurchasedCard />} />
+          <Route path="purchased-member-card/view/:id" element={<ViewPurchasedCard />} />
           <Route path="membership/add" element={<MembershipAdd />} />
           <Route path="membership/view/:id" element={<ViewMembership />} />
           <Route path="membership/edit/:id" element={<EditMembershipPage />} />
+
+          <Route path="voucher" element={<VoucherList />} />
+          <Route path="voucher/add" element={<VoucherAdd />} />
+          <Route path="voucher/view/:id" element={<VoucherView />} />
+          <Route path="voucher/edit/:id" element={<VoucherEdit />} />
+
 
           <Route path="event" element={<EventList />} />
           <Route path="event-booking" element={<EventBookings />} />

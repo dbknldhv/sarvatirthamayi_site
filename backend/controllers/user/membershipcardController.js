@@ -8,7 +8,9 @@ const path = require('path');
 const { generateMembershipCertificate } = require('../../utils/pdfGenerator');
 const mailSender = require("../../utils/mailSender");
 
-// Helper for Razorpay Instance
+/**
+ * Razorpay Instance Helper
+ */
 const getRazorpayInstance = () => {
     const key_id = process.env.RAZORPAY_KEY_ID;
     const key_secret = process.env.RAZORPAY_KEY_SECRET;
@@ -16,41 +18,58 @@ const getRazorpayInstance = () => {
     return new Razorpay({ key_id, key_secret });
 };
 
+/**
+ * 1. Create Razorpay Order for Membership
+ */
 exports.createMembershipOrder = async (req, res) => {
     try {
-        const rzp = getRazorpayInstance();
-        const { planId } = req.body; 
+        const { planId } = req.body;
+        if (!planId) return res.status(400).json({ success: false, message: "Membership plan ID is required" });
 
+        const rzp = getRazorpayInstance();
         if (!rzp) return res.status(500).json({ success: false, message: "Payment Gateway Config Missing" });
 
         const plan = await Membership.findById(planId);
         if (!plan) return res.status(404).json({ success: false, message: "Selected plan not found" });
 
         const options = {
-            amount: Math.round(plan.price * 100), 
+            amount: Math.round(plan.price * 100), // paise
             currency: "INR",
-            receipt: `membership_rcpt_${Date.now()}`,
+            receipt: `mem_order_${Date.now()}`,
         };
 
         const order = await rzp.orders.create(options);
-        // Include plan_id so the frontend can send it back for verification
-        res.status(200).json({ success: true, data: order, plan_id: plan._id });
+        res.status(200).json({ 
+            success: true, 
+            data: order, 
+            plan_id: plan._id,
+            recalculatedPrice: plan.price 
+        });
     } catch (error) {
         res.status(500).json({ success: false, message: "Order creation failed", error: error.message });
     }
 };
 
+/**
+ * 2. Verify Payment & Activate Membership
+ * Includes logic to update User status for platform-wide discounts.
+ */
 exports.verifyAndActivateMembership = async (req, res) => {
     try {
         const { 
             razorpay_payment_id, 
             razorpay_order_id, 
             razorpay_signature, 
-            plan_id, // Ensure frontend sends this
+            plan_id,
             birthday, 
             importantDate, 
             favoriteTemples 
         } = req.body;
+
+        // Validation: Ensure all Razorpay fields and Plan ID exist
+        if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature || !plan_id) {
+            return res.status(400).json({ success: false, message: "Missing required payment verification details" });
+        }
 
         // 1. Signature Verification
         const key_secret = process.env.RAZORPAY_KEY_SECRET;
@@ -60,31 +79,30 @@ exports.verifyAndActivateMembership = async (req, res) => {
             .digest("hex");
 
         if (generated_signature !== razorpay_signature) {
-            return res.status(400).json({ success: false, message: "Transaction verification failed" });
+            return res.status(400).json({ success: false, message: "Transaction verification failed: Invalid Signature" });
         }
 
-        // 2. Fetch the actual Plan details from your Membership model
         const plan = await Membership.findById(plan_id);
-        if (!plan) return res.status(404).json({ success: false, message: "Plan not found" });
+        if (!plan) return res.status(404).json({ success: false, message: "Membership plan not found" });
 
-        // 3. Calculate Dates based on Model's duration and duration_type
+        // 2. Calculate Membership Expiry
         const start_date = new Date();
         const end_date = new Date();
-        if (plan.duration_type === 2) { // Years
+        if (plan.duration_type === 2) { // 2 = Years (Legacy SQL mapping)
             end_date.setFullYear(start_date.getFullYear() + plan.duration);
-        } else { // Months
+        } else { // 1 = Months
             end_date.setMonth(start_date.getMonth() + plan.duration);
         }
 
-        // 4. Save to PurchasedMemberCard
+        // 3. Create Purchased Card Record
         const newCard = await PurchasedMemberCard.create({
             user_id: req.user.id,
             membership_card_id: plan._id,
-            card_status: 1, 
+            card_status: 1, // 1: Active
             start_date,
             end_date,
             max_visits: plan.visits,
-            payment_status: 2, 
+            payment_status: 2, // 2: Paid
             razorpay_order_id,
             razorpay_payment_id,
             payment_date: new Date(),
@@ -96,111 +114,87 @@ exports.verifyAndActivateMembership = async (req, res) => {
             sql_id: Math.floor(100000 + Math.random() * 900000)
         });
 
-        // Upgrade User
+        // 4. SYNC USER DISCOUNTS: Update User to "active" status
+        // This ensures calculatePrice in Temple/Ritual controllers sees the user as a member
         const updatedUser = await User.findByIdAndUpdate(
             req.user.id, 
-            { is_member: true }, 
+            { 
+                is_member: true, 
+                status: 1, 
+                membership: "active" 
+            }, 
             { new: true }
         );
 
-        // --- GENERATE PDF & SEND MAIL ---
+        // 5. Generate Branded Certificate & Send Email
         try {
+            // Using the path resolution from our pdfGenerator update
             const { fileName, filePath } = await generateMembershipCertificate(newCard, updatedUser);
             
             const membershipId = `STM-${newCard._id.toString().slice(-12).toUpperCase()}`;
             const emailBody = `
-                <div style="font-family: sans-serif; color: #333;">
-                    <h2>Namaste ${updatedUser.name},</h2>
-                    <p>Congratulations! Your <strong>Sovereign Membership</strong> with Sarvatirthamayi Club is now active.</p>
-                    <p>Your unique Membership ID is: <strong>${membershipId}</strong></p>
-                    <p>We have attached your official digital membership certificate to this email. You can also view your digital card anytime on your profile.</p>
-                    <br/>
-                    <p>Enjoy your exclusive 25% discount on all future ritual bookings!</p>
+                <div style="font-family: sans-serif; padding: 30px; border: 2px solid #fbbf24; border-radius: 20px; max-width: 600px;">
+                    <h2 style="color: #0f172a; border-bottom: 1px solid #fbbf24; padding-bottom: 10px;">Namaste ${updatedUser.name},</h2>
+                    <p>Congratulations! You are now a <strong>Sovereign Member</strong> of the Sarvatirthamayi Club.</p>
+                    
+                    <div style="background: #f8fafc; padding: 15px; border-radius: 10px; margin: 20px 0; border-left: 5px solid #fbbf24;">
+                        <p style="margin: 5px 0;"><b>Membership ID:</b> ${membershipId}</p>
+                        <p style="margin: 5px 0;"><b>Valid Until:</b> ${end_date.toDateString()}</p>
+                    </div>
+
+                    <p>Your official digital certificate is attached to this email. You can also view your card on your profile.</p>
+                    <p style="margin-top: 25px; color: #7c3aed; font-weight: bold;">
+                        Your 0.7% Membership Discount is now automatically applied to all Ritual and Temple assistance bookings!
+                    </p>
                 </div>
             `;
 
-            // Use your mailSender utility but with the attachment capability
-            // We use a custom transporter here to ensure the attachment sends correctly
-            const nodemailer = require("nodemailer");
-            const transporter = nodemailer.createTransport({
-                host: process.env.MAIL_HOST,
-                port: 465,
-                secure: true,
-                auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASS },
-            });
-
-            await transporter.sendMail({
-                from: `Sarvatirthamayi <${process.env.MAIL_USER}>`,
-                to: updatedUser.email,
-                subject: "Your Sovereign Membership Certificate - Sarvatirthamayi",
-                html: emailBody,
-                attachments: [
-                    {
-                        filename: `Membership_Certificate.pdf`,
-                        path: filePath
-                    }
-                ]
-            });
+            await mailSender(
+                updatedUser.email,
+                "Sovereign Membership Certificate - Sarvatirthamayi",
+                emailBody,
+                [{ filename: `Membership_Certificate_${membershipId}.pdf`, path: filePath }]
+            );
         } catch (mailError) {
-            console.error("Post-activation (PDF/Mail) error:", mailError);
-            // We don't return an error response here because the payment/activation WAS successful
+            console.error("Certificate Generation/Mail Error:", mailError.message);
+            // We don't fail the request here because the DB purchase was successful
         }
 
-        res.status(200).json({ success: true, message: "Membership Activated & Certificate Sent", data: newCard });
+        res.status(200).json({ 
+            success: true, 
+            message: "Membership successfully activated", 
+            data: newCard 
+        });
+
     } catch (error) {
+        console.error("Membership Verification Error:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 };
 
-// --- 3. Get User Card (Populated) ---
+/**
+ * 3. Fetch My Membership Card details
+ */
 exports.getMyMembershipCard = async (req, res) => {
     try {
-        
         const card = await PurchasedMemberCard.findOne({ 
             user_id: req.user.id, 
             payment_status: 2 
         }).sort({ created_at: -1 });
 
-        if (!card) return res.status(404).json({ success: false, message: "No active membership" });
+        if (!card) {
+            return res.status(404).json({ success: false, message: "No active membership found for this account" });
+        }
 
+        // Fetch details of favorite temples stored on the card
         const templeDetails = await Temple.find({
             name: { $in: card.favorite_temples }
-        }).select('name image location');
+        }).select('name image location city_name');
 
         res.status(200).json({ 
             success: true, 
             data: { ...card._doc, templeDetails } 
         });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// --- 4. Mock Activation (For Testing) ---
-exports.mockVerifyAndActivate = async (req, res) => {
-    try {
-        const { birthday, importantDate, favoriteTemples } = req.body;
-        const plan = await Membership.findOne() || { _id: "65f1a2b3c4d5e6f7a8b9c0d1", price: 6599 };
-
-        const newCard = await PurchasedMemberCard.create({
-            user_id: req.user.id,
-            membership_card_id: plan._id,
-            card_status: 1,
-            start_date: new Date(),
-            end_date: new Date(new Date().setFullYear(new Date().getFullYear() + 99)),
-            payment_status: 2,
-            razorpay_order_id: "mock_order_" + Date.now(),
-            razorpay_payment_id: "mock_pay_" + Date.now(),
-            membership_card_amount: plan.price,
-            paid_amount: plan.price,
-            birthday: birthday ? new Date(birthday) : null,
-            important_date: importantDate ? new Date(importantDate) : null,
-            favorite_temples: favoriteTemples || [],
-            sql_id: Math.floor(100000 + Math.random() * 900000)
-        });
-
-        await User.findByIdAndUpdate(req.user.id, { is_member: true });
-        res.status(200).json({ success: true, message: "Mock Activated", data: newCard });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

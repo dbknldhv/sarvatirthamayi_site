@@ -9,6 +9,7 @@ import { useAuth } from "../../context/AuthContext";
 export default function UserSignup() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
+  
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(1); 
   const [isSuccess, setIsSuccess] = useState(false);
@@ -19,6 +20,7 @@ export default function UserSignup() {
 
   const [formData, setFormData] = useState({
     first_name: "",
+    last_name: "", // Added explicitly
     email: "",
     mobile_number: "",
     password: "",
@@ -26,7 +28,7 @@ export default function UserSignup() {
     otp: ""
   });
 
-  // Redirect if already logged in
+  // Redirect if user is already logged in
   useEffect(() => {
     if (!authLoading && user) navigate('/', { replace: true });
   }, [user, authLoading, navigate]);
@@ -43,19 +45,24 @@ export default function UserSignup() {
     return () => clearInterval(interval);
   }, [step, timer]);
 
+  // --- STEP 1: Handle Initial Signup ---
   const handleSignupSubmit = async (e) => {
     e.preventDefault();
     setError("");
     
+    // Validations
     if (formData.password.length < 6) return setError("Password must be at least 6 characters.");
     if (formData.password !== formData.confirmPassword) return setError("Passwords do not match!");
+    if (formData.mobile_number.length !== 10) return setError("Enter a valid 10-digit mobile number.");
 
     setLoading(true);
     try {
+      // Sending data to Backend (Matching userController.js keys)
       const { data } = await api.post("/user/signup", {
-        first_name: formData.first_name,
-        email: formData.email,
-        mobile_number: formData.mobile_number,
+        first_name: formData.first_name.trim(),
+        last_name: formData.last_name.trim(),
+        email: formData.email.toLowerCase().trim(),
+        mobile_number: formData.mobile_number.trim(),
         password: formData.password
       });
 
@@ -65,36 +72,59 @@ export default function UserSignup() {
         setCanResend(false);
       }
     } catch (err) {
+      // Map 400/500 errors to user-friendly messages
       setError(err.response?.data?.message || "Signup failed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
+  // --- STEP 2: Handle OTP Verification ---
   const handleVerifyOtp = async (e) => {
     if (e) e.preventDefault();
-    if (formData.otp.length !== 6) return setError("Enter the 6-digit verification code.");
-    
+    if (formData.otp.length !== 6)
+      { 
+        return setError("Enter the 6-digit verification code.");
+      }
     setError("");
     setLoading(true);
     try {
       const { data } = await api.post("/user/verify-otp", {
-        mobile_number: formData.mobile_number,
-        otp: formData.otp
+        mobile_number: formData.mobile_number.trim(),
+        otp: formData.otp.trim()
       });
 
       if (data.success) {
         setIsSuccess(true);
+        // Short delay to show the success animation
         setTimeout(() => {
-          // 🎯 Path corrected to match App.jsx route
-          navigate("/user/login", { 
-            state: { mobile: formData.mobile_number, message: "Verification successful! Please log in." },
+          navigate("/login", { 
+            state: { 
+              mobile: formData.mobile_number, 
+              message: "Verification successful! Please log in." 
+            },
             replace: true 
           });
         }, 2500);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Invalid OTP. Please check and try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Resend OTP Logic
+  const handleResendOtp = async () => {
+    if (!canResend) return;
+    setLoading(true);
+    try {
+      await api.post("/user/resend-otp", { mobile_number: formData.mobile_number.trim() });
+      setTimer(30);
+      setCanResend(false);
+      setError("");
+    } catch (err) {
+      setError("Failed to resend OTP.");
     } finally {
       setLoading(false);
     }
@@ -107,16 +137,16 @@ export default function UserSignup() {
   );
 
   return (
-    <div className="flex min-h-screen bg-white lg:bg-[#fcfaff] selection:bg-purple-200">
+    <div className="flex min-h-screen bg-white lg:bg-[#fcfaff] selection:bg-purple-200 font-sans">
       
-      {/* 🏛️ Left Side - Brand Section */}
+      {/* --- Left Side: Visual Brand Section --- */}
       <div className="hidden lg:flex lg:w-[40%] xl:w-[45%] relative bg-purple-950 overflow-hidden">
         <img src="/assets/event-banner.png" alt="Temple" className="absolute inset-0 w-full h-full object-cover opacity-30 scale-105" />
         <div className="absolute inset-0 bg-gradient-to-br from-purple-900 via-purple-900/40 to-transparent" />
         
         <div className="relative z-10 flex flex-col justify-between p-12 text-white w-full">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-white rounded-xl shadow-lg shadow-purple-500/20">
+            <div className="p-2 bg-white rounded-xl shadow-lg">
               <img src="/assets/favicon.ico" alt="Logo" className="w-8 h-8" />
             </div>
             <span className="font-serif text-2xl tracking-wide font-bold">STM Club</span>
@@ -131,20 +161,21 @@ export default function UserSignup() {
         </div>
       </div>
 
-      {/* 📝 Right Side - Form Section */}
+      {/* --- Right Side: Form Section --- */}
       <div className="w-full lg:w-[60%] xl:w-[55%] flex flex-col justify-center items-center p-6 sm:p-12 relative bg-white">
         
-        {/* Back Home Button */}
+        {/* Navigation Link: Back to Home */}
         <div className="absolute top-8 left-8 z-20">
-             <Link to="/" className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-purple-600 transition-all group">
+              <Link to="/" className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-purple-600 transition-all group">
                 <FiChevronLeft className="group-hover:-translate-x-1 transition-transform" />
                 Back to Home
-             </Link>
+              </Link>
         </div>
 
         <div className="w-full max-w-md">
           <AnimatePresence mode="wait">
             {isSuccess ? (
+              /* --- Success View --- */
               <motion.div key="success" initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="text-center py-10">
                 <div className="w-24 h-24 bg-green-50 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl shadow-green-100">
                   <FiCheckCircle size={60} />
@@ -153,6 +184,7 @@ export default function UserSignup() {
                 <p className="text-slate-500">Redirecting you to the login screen...</p>
               </motion.div>
             ) : step === 1 ? (
+              /* --- Step 1: Account Details --- */
               <motion.div key="signup" initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 20, opacity: 0 }}>
                 <div className="mb-10 text-center lg:text-left">
                   <h2 className="text-3xl sm:text-4xl font-serif text-slate-900 mb-2">Create Account</h2>
@@ -167,9 +199,14 @@ export default function UserSignup() {
                 )}
 
                 <form onSubmit={handleSignupSubmit} className="space-y-4">
-                  <div className="relative group">
-                    <FiUser className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-purple-600" />
-                    <input type="text" placeholder="First Name" required className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-purple-500 focus:bg-white transition-all" value={formData.first_name} onChange={(e) => setFormData({...formData, first_name: e.target.value})} />
+                  <div className="flex gap-4">
+                    <div className="relative group w-1/2">
+                      <FiUser className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-purple-600" />
+                      <input type="text" placeholder="First Name" required className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-purple-500 focus:bg-white transition-all" value={formData.first_name} onChange={(e) => setFormData({...formData, first_name: e.target.value})} />
+                    </div>
+                    <div className="relative group w-1/2">
+                      <input type="text" placeholder="Last Name" className="w-full px-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-purple-500 focus:bg-white transition-all" value={formData.last_name} onChange={(e) => setFormData({...formData, last_name: e.target.value})} />
+                    </div>
                   </div>
                   
                   <div className="relative group">
@@ -201,6 +238,7 @@ export default function UserSignup() {
                 </form>
               </motion.div>
             ) : (
+              /* --- Step 2: OTP Verification --- */
               <motion.div key="otp" initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -20, opacity: 0 }} className="text-center">
                 <div className="mb-8">
                   <div className="w-20 h-20 bg-purple-50 text-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner"><FiMail size={40} /></div>
@@ -229,7 +267,7 @@ export default function UserSignup() {
                     <p className="text-sm text-slate-500">
                       Didn't receive the code? <br />
                       {canResend ? (
-                        <button type="button" onClick={() => {/* Resend logic */}} className="text-purple-600 font-bold hover:underline mt-1">Resend Now</button>
+                        <button type="button" onClick={handleResendOtp} className="text-purple-600 font-bold hover:underline mt-1">Resend Now</button>
                       ) : (
                         <span className="text-slate-400 font-medium">Resend available in <span className="text-purple-600">{timer}s</span></span>
                       )}
@@ -245,7 +283,7 @@ export default function UserSignup() {
           </AnimatePresence>
 
           <div className="mt-12 pt-8 border-t border-slate-100 text-center">
-            <p className="text-slate-500 font-medium">Already a member? <Link to="/user/login" className="text-purple-600 font-bold hover:underline ml-1">Sign In</Link></p>
+            <p className="text-slate-500 font-medium">Already a member? <Link to="/login" className="text-purple-600 font-bold hover:underline ml-1">Sign In</Link></p>
           </div>
         </div>
       </div>

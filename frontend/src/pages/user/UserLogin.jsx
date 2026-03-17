@@ -54,16 +54,16 @@ const UserLogin = () => {
                 password: formData.password 
             });
 
-            // login() in AuthContext should return the response
-            if (res?.success) {
-                navigate(from, { replace: true }); 
-            }
-        } catch (err) {
-            const errorMessage = err.response?.data?.message || err.message || "Invalid mobile number or password";
-            setError(errorMessage);
-        } finally {
-            setLoading(false);
+           if (res?.success || res?.token) {
+            // Force redirect to Home if 'from' is missing
+            const destination = location.state?.from || "/";
+            navigate(destination, { replace: true }); 
         }
+    } catch (err) {
+        setError(err.response?.data?.message || "Invalid mobile number or password");
+    } finally {
+        setLoading(false);
+    }
     };
 
     if (authLoading) {
@@ -91,18 +91,18 @@ const UserLogin = () => {
             {/* Right Side Form */}
             <div className="w-full lg:w-[50%] xl:w-[45%] flex flex-col justify-center items-center p-6 sm:p-12 md:p-20 relative bg-white">
                 
-                {/* 🎯 FIX 3: Improved "Back to Home" Navigation */}
-                <div className="absolute top-6 left-6 sm:top-12 sm:left-12 z-20">
-                     <Link 
-                        to="/" 
-                        className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-purple-600 transition-all group"
-                     >
-                        <FiChevronLeft className="group-hover:-translate-x-1 transition-transform" />
-                        Back to Home
-                     </Link>
-                </div>
-
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full max-w-md">
+
+                {/* 🎯 FIX 3: Improved "Back to Home" Navigation */}
+                <div className="mb-8">
+                <Link 
+                to="/" 
+                className="inline-flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-purple-600 transition-all group"
+                 >
+                <FiChevronLeft className="group-hover:-translate-x-1 transition-transform" />
+                Back to Home
+             </Link>
+                </div>
                     <div className="mb-10 text-center lg:text-left">
                         <h1 className="text-3xl sm:text-4xl font-serif text-slate-900 mb-3">Sign In</h1>
                         <p className="text-slate-500 font-medium">Welcome back! Please enter your details.</p>

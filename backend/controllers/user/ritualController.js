@@ -2,15 +2,17 @@ const mongoose = require("mongoose");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const path = require("path");
-const pdfGenerator = require("../../utils/pdfGenerator"); // Import your PDF utility
+const pdfGenerator = require("../../utils/pdfGenerator");
+const mailSender = require("../../utils/mailSender");
+const { validateVoucher, redeemVoucher } = require("../../utils/voucherHelper");
 
 /**
  * 🛠️ DEFENSIVE MODEL LOADING
- * Prevents 'OverwriteModelError' by checking the Mongoose registry first.
  */
 const Ritual = mongoose.models.Ritual || require("../../models/Ritual");
 const RitualBooking = mongoose.models.RitualBooking || require("../../models/RitualBooking");
 const RitualPackage = mongoose.models.RitualPackage || require("../../models/RitualPackage");
+const User = mongoose.models.User || require("../../models/User");
 
 /**
  * Razorpay Instance Helper
@@ -22,11 +24,66 @@ const getRazorpayInstance = () => {
     });
 };
 
+/**
+ * --- HELPER: Secure Ritual Price Calculation ---
+ * Now integrates both Membership (0.7%) and Voucher logic.
+ */
+const calculateRitualPrice = async (userId, packageId, voucherCode = null) => {
+    const [pkg, user] = await Promise.all([
+        RitualPackage.findById(packageId),
+        User.findById(userId)
+    ]);
+
+    if (!pkg) throw new Error("Ritual package not found");
+
+    let basePrice = pkg.price || 0;
+    let finalPrice = basePrice;
+    let discountType = "None";
+    let voucherId = null;
+
+    // 1. Apply Membership Discount (0.7%)
+    if (user?.status === 1 && user?.membership === "active") {
+        finalPrice = basePrice * 0.993; 
+        discountType = "Membership (0.7%)";
+    }
+
+    // 2. Apply Voucher Discount (If provided)
+    if (voucherCode) {
+        const voucherResult = await validateVoucher(voucherCode, userId, "ritual", finalPrice);
+        finalPrice = voucherResult.finalAmount;
+        voucherId = voucherResult.voucherId;
+        discountType = discountType === "None" ? "Voucher" : `${discountType} + Voucher`;
+    }
+
+    return { 
+        basePrice, 
+        finalPrice: Number(finalPrice.toFixed(2)), 
+        discountType,
+        voucherId
+    };
+};
+
 // --- 1. DATA FETCHING ROUTES ---
 
 /**
- * Get all active rituals with populated temple names
+ * Fetch distinct ritual types for filtering/dropdowns
  */
+exports.getRitualTypes = async (req, res) => {
+    try {
+        const types = await Ritual.distinct("type"); 
+        res.status(200).json({ 
+            success: true, 
+            data: types 
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            success: false, 
+            message: "Failed to fetch ritual types", 
+            error: error.message 
+        });
+    }
+};
+
 exports.getAllRituals = async (req, res) => {
     try {
         const rituals = await Ritual.find({ status: 1 }).populate("temple_id", "name");
@@ -36,9 +93,6 @@ exports.getAllRituals = async (req, res) => {
     }
 };
 
-/**
- * Get rituals specific to a temple
- */
 exports.getRitualsByTemple = async (req, res) => {
     try {
         const rituals = await Ritual.find({ temple_id: req.params.templeId, status: 1 });
@@ -48,9 +102,6 @@ exports.getRitualsByTemple = async (req, res) => {
     }
 };
 
-/**
- * Get ritual details plus all associated packages
- */
 exports.getRitualDetailsWithPackages = async (req, res) => {
     try {
         const ritual = await Ritual.findById(req.params.ritualId).populate("temple_id");
@@ -67,46 +118,50 @@ exports.getRitualDetailsWithPackages = async (req, res) => {
     }
 };
 
-/**
- * Get unique ritual categories/types
- */
-exports.getRitualTypes = async (req, res) => {
-    try {
-        const types = await Ritual.distinct("type"); 
-        res.status(200).json({ success: true, data: types });
-    } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
-    }
-};
-
-// --- 2. PAYMENT & BOOKING LOGIC ---
+// --- 2. SECURE PAYMENT & BOOKING LOGIC ---
 
 /**
  * Create Razorpay Order
+ * Recalculates price including potential voucher discounts.
  */
 exports.createRitualOrder = async (req, res) => {
     try {
+        const { packageId, voucherCode } = req.body;
+        const { finalPrice } = await calculateRitualPrice(req.user.id, packageId, voucherCode);
+
         const rzp = getRazorpayInstance();
         const order = await rzp.orders.create({
-            amount: Math.round(Number(req.body.amount) * 100), // convert to paise
+            amount: Math.round(finalPrice * 100), 
             currency: "INR",
             receipt: `rit_${Date.now()}`,
         });
-        res.status(200).json({ success: true, data: order });
+        
+        res.status(200).json({ 
+            success: true, 
+            data: order, 
+            finalAmount: finalPrice 
+        });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
 };
 
 /**
- * 💳 VERIFY PAYMENT & GENERATE RECEIPT
- * Verifies Razorpay signature, creates DB record, and generates PDF
+ * 💳 VERIFY PAYMENT & FINALISE
+ * Confirms payment and "burns" the voucher so it's one-time use.
  */
 exports.verifyRitualBooking = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature, bookingData } = req.body;
 
-        // 1. Verify Payment Signature
+        // 1. Security Recalculation (Backend verification of the amount)
+        const { finalPrice, basePrice, discountType, voucherId } = await calculateRitualPrice(
+            req.user.id, 
+            bookingData.packageId, 
+            bookingData.voucherCode
+        );
+
+        // 2. Verify Payment Signature
         const shasum = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET);
         shasum.update(`${razorpay_order_id}|${razorpay_payment_id}`);
 
@@ -114,7 +169,7 @@ exports.verifyRitualBooking = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid Payment Signature" });
         }
 
-        // 2. Create Booking Entry
+        // 3. Create Booking Entry
         const newBooking = new RitualBooking({
             sql_id: Math.floor(100000 + Math.random() * 900000),
             booking_id: `RIT-${Date.now()}`,
@@ -125,38 +180,58 @@ exports.verifyRitualBooking = async (req, res) => {
             date: new Date(bookingData.bookingDate || bookingData.date),
             devotees_name: bookingData.devoteeName,
             whatsapp_number: bookingData.whatsappNumber,
-            wish: bookingData.specialWish || bookingData.wish || "",
-            original_amount: bookingData.amount,
-            paid_amount: bookingData.amount,
-            razorpay_order_id: razorpay_order_id,
-            razorpay_payment_id: razorpay_payment_id,
-            payment_status: 2, // 2: Paid
-            booking_status: 2, // 2: Confirmed
+            wish: bookingData.specialWish || "",
+            original_amount: basePrice,
+            paid_amount: finalPrice,
+            discount_type: discountType,
+            razorpay_order_id,
+            razorpay_payment_id,
+            payment_status: 2, 
+            booking_status: 2, 
             payment_date: new Date()
         });
 
         const savedBooking = await newBooking.save();
 
-        // 3. Populate Data for the Receipt
-        // PDF Generator needs names instead of IDs
+        // 4. ONE-TIME USE LOCK: Burn the voucher after successful payment
+        if (voucherId) {
+            await redeemVoucher(voucherId, req.user.id);
+        }
+
+        // 5. Fulfillment (PDF & Email)
         const populatedBooking = await RitualBooking.findById(savedBooking._id)
             .populate("ritual_id", "name")
             .populate("temple_id", "name city_name");
 
-        // 4. Generate the Receipt PDF
-        // Logic handled in backend/utils/pdfGenerator.js
         const fileName = await pdfGenerator.generateRitualReceipt(populatedBooking);
+        const receiptPath = path.join(__dirname, "../../public/rituals", fileName);
+        
+        savedBooking.ticket_url = `/rituals/${fileName}`;
+        await savedBooking.save();
 
-        // 5. Construct the Public Download URL
-        // Ensure app.use('/rituals', express.static(...)) is set in server.js
-        const receiptUrl = `${req.protocol}://${req.get("host")}/rituals/${fileName}`;
+        const emailContent = `
+            <div style="font-family: sans-serif; padding: 20px; border: 2px solid #7c3aed; border-radius: 15px;">
+                <h2 style="color: #7c3aed;">Sacred Ritual Confirmed</h2>
+                <p>Pranams <b>${savedBooking.devotees_name}</b>,</p>
+                <p>Your ritual <b>${populatedBooking.ritual_id.name}</b> at <b>${populatedBooking.temple_id.name}</b> is confirmed.</p>
+                <p><b>Paid:</b> ₹${savedBooking.paid_amount}</p>
+                <p>Attached is your receipt.</p>
+            </div>
+        `;
+
+        await mailSender(
+            req.user.email,
+            `Ritual Confirmation: ${populatedBooking.ritual_id.name}`,
+            emailContent,
+            [{ filename: `Receipt_${savedBooking.booking_id}.pdf`, path: receiptPath }]
+        );
 
         res.status(200).json({
             success: true,
             message: "Ritual Booked Successfully!",
             data: {
                 bookingId: savedBooking.booking_id,
-                receiptUrl: receiptUrl 
+                receiptUrl: savedBooking.ticket_url 
             }
         });
     } catch (error) {
