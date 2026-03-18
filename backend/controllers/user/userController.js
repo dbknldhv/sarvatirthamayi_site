@@ -179,14 +179,16 @@ exports.loginUser = async (req, res) => {
             success: true,               // React uses this boolean
             message: "Login Successful", // Matches Flutter's Constants.loginSuccessful
             token: token,                // Root level for React
-            redirectPath,
+            //redirectPath,
             
             // 🎯 FLUTTER DATA OBJECT (Matches LoginModel & LoginBloc)
             data: {                   
                 userId: user._id,
+                user_id: user._id,
                 first_name: user.first_name || user.name || "",
                 last_name: user.last_name || "",
                 userType: user.role === 'admin' ? 1 : (user.role === 'temple-admin' ? 2 : 3),
+                user_type: user.role === 'admin' ? 1 : (user.role === 'temple-admin' ? 2 : 3),
                 accessToken: token, 
                 access_token: token,
                 accesstoken: token,  
@@ -197,6 +199,8 @@ exports.loginUser = async (req, res) => {
             // 🎯 REACT/ADMIN USER OBJECT
             user: {
                 ...userResponse,
+                email: user.email,
+                name: user.first_name,
                 id: user._id,
                 role: user.role,         // React uses 'admin', 'temple-admin', or 'user'
                 user_type: userTypeInt   // Backup for React
