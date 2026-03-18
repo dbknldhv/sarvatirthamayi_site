@@ -143,7 +143,8 @@ exports.resendOtp = async (req, res) => {
     }
 };
 
-// --- 5. LOGIN ---
+// --- 5. LOGIN (Supporting React & Flutter) ---
+// --- 5. LOGIN (Supporting React Admin & Flutter App) ---
 exports.loginUser = async (req, res) => {
     try {
         const { mobile, password } = req.body;
@@ -158,21 +159,53 @@ exports.loginUser = async (req, res) => {
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" });
         
         let redirectPath = "/";
-        if (user.role === 'admin') redirectPath = "/admin/dashboard";
-        if (user.role === 'temple-admin') redirectPath = "/temple/dashboard";
+        let userTypeInt = 3; // Default for regular users
+
+        // Mapping Logic for both platforms
+        if (user.role === 'admin') {
+            redirectPath = "/admin/dashboard";
+            userTypeInt = 1;
+        } else if (user.role === 'temple-admin') {
+            redirectPath = "/temple/dashboard";
+            userTypeInt = 2;
+        }
 
         const userResponse = user.toObject();
         delete userResponse.password;
 
+        // --- THE UNIVERSAL JSON RESPONSE ---
         res.status(200).json({ 
-            success: true, 
-            token, 
-            role: user.role,
+            status: "true",              // Flutter checks this string
+            success: true,               // React uses this boolean
+            message: "Login Successful", // Matches Flutter's Constants.loginSuccessful
+            token: token,                // Root level for React
             redirectPath,
-            user: userResponse 
+            
+            // 🎯 FLUTTER DATA OBJECT (Matches LoginModel & LoginBloc)
+            data: {                   
+                userId: user._id,
+                first_name: user.first_name || user.name || "",
+                last_name: user.last_name || "",
+                userType: userTypeInt,   // Returns 1, 2, or 3
+                accessToken: token,      // CamelCase for Flutter
+                email: user.email,
+                profile_picture: user.profile_picture || ""
+            },
+
+            // 🎯 REACT/ADMIN USER OBJECT
+            user: {
+                ...userResponse,
+                id: user._id,
+                role: user.role,         // React uses 'admin', 'temple-admin', or 'user'
+                user_type: userTypeInt   // Backup for React
+            }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ 
+            status: "false",
+            success: false, 
+            message: error.message 
+        });
     }
 };
 
