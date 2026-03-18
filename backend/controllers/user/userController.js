@@ -188,7 +188,8 @@ exports.loginUser = async (req, res) => {
                 last_name: user.last_name || "",
                 userType: user.role === 'admin' ? 1 : (user.role === 'temple-admin' ? 2 : 3),
                 accessToken: token, 
-                access_token: token,    
+                access_token: token,
+                accesstoken: token,  
                 email: user.email,
                 profile_picture: user.profile_picture || ""
             },
