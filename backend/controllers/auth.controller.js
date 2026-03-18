@@ -145,23 +145,47 @@ exports.adminSignup = async (req, res) => {
 /**
  * 4. UNIFIED LOGIN (React & Flutter)
  */
+/**
+ * UNIFIED LOGIN - Supports React (mobileNumber) & Flutter (mobile_number)
+ * Handles country code stripping (+91) for Flutter requests
+ */
 exports.login = async (req, res) => {
     try {
-        const mobileNumber = req.body.mobile_number || req.body.mobileNumber;
         const { email, password } = req.body;
+        
+        // 1. Extract raw mobile from either Flutter or React key
+        let rawMobile = req.body.mobile_number || req.body.mobileNumber;
         let user;
 
         if (email) {
             user = await User.findOne({ email: email.toLowerCase() });
-        } else if (mobileNumber) {
-            user = await User.findOne({ mobile_number: mobileNumber });
+        } else if (rawMobile) {
+            // 2. SANITIZE: Remove '+91' or any non-digits and keep the last 10 digits
+            // This ensures +919182635762 becomes 9182635762 to match your DB
+            const sanitizedMobile = rawMobile.replace(/\D/g, '').slice(-10);
+            
+            user = await User.findOne({ mobile_number: sanitizedMobile });
         }
 
-        if (!user) return res.status(401).json({ status: "false", success: false, message: "Invalid credentials." });
+        // 3. VALIDATION
+        if (!user) {
+            return res.status(401).json({ 
+                status: "false", 
+                success: false, 
+                message: "Invalid credentials (User not found)." 
+            });
+        }
 
         const isMatch = await user.matchPassword(password);
-        if (!isMatch) return res.status(401).json({ status: "false", success: false, message: "Invalid credentials." });
+        if (!isMatch) {
+            return res.status(401).json({ 
+                status: "false", 
+                success: false, 
+                message: "Invalid credentials (Password mismatch)." 
+            });
+        }
 
+        // 4. TOKEN GENERATION
         const token = jwt.sign(
             { id: user._id, user_type: user.user_type, role: user.role },
             process.env.JWT_SECRET,
@@ -170,26 +194,35 @@ exports.login = async (req, res) => {
 
         const paths = { 1: "/admin/dashboard", 2: "/temple-admin/dashboard", 3: "/" };
 
+        // 5. RESPONSE (Unified for Flutter Models & React Admin)
         res.status(200).json({
-            status: "true",
-            success: true,
+            status: "true",           // Required by Flutter LoginModel
+            success: true,            // Required by React Admin
             message: "Login Successful",
-            token: token,
+            token: token,             // React legacy key
             redirectPath: paths[user.user_type] || "/",
-            data: {
+            data: {                   // Flutter Data Object
                 user_id: user.sql_id || 0,
                 first_name: user.first_name,
                 last_name: user.last_name || "",
-                access_token: token,
+                access_token: token,  // Flutter model key
                 email: user.email || "",
                 date_of_birth: user.date_of_birth || "",
                 gender: String(user.gender || ""),
                 user_type: String(user.user_type || ""),
                 profile_picture: getFullImageUrl(user.profile_picture)
             },
-            user: { id: user._id, email: user.email, name: user.first_name, user_type: user.user_type, role: user.role }
+            // Legacy user object for React
+            user: { 
+                id: user._id, 
+                email: user.email, 
+                name: user.first_name, 
+                user_type: user.user_type, 
+                role: user.role 
+            }
         });
     } catch (err) {
+        console.error("Login Error:", err);
         res.status(500).json({ status: "false", success: false, message: "Server error" });
     }
 };
