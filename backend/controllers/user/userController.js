@@ -184,10 +184,11 @@ exports.loginUser = async (req, res) => {
             // 🎯 FLUTTER DATA OBJECT (Matches LoginModel & LoginBloc)
             data: {                   
                 userId: user._id,
-                first_name: user.first_name || user.name || "",
+                first_name: user.first_name,
                 last_name: user.last_name || "",
                 userType: userTypeInt,   // Returns 1, 2, or 3
-                accessToken: token,      // CamelCase for Flutter
+                accessToken: token, 
+                access_token: token,    
                 email: user.email,
                 profile_picture: user.profile_picture || ""
             },
