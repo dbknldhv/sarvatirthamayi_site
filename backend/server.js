@@ -107,6 +107,7 @@ app.use("/api/user", userRoutes);
 // This maps /api/v1/login directly to your auth controller
 app.use('/api/v1', authRoutes); 
 app.use('/api/v1/user', userRoutes);
+app.use('/api/v1', userRoutes);
 app.use('/api/v1/admin', adminRoutes);
 
 // Optional: If your Flutter app calls /api/v1/admin/auth/login specifically
