@@ -202,21 +202,22 @@ exports.login = async (req, res) => {
             token: token,             // React legacy key
             redirectPath: paths[user.user_type] || "/",
             data: {                   // Flutter Data Object
-                user_id: user.sql_id || 0,
-                first_name: user.first_name,
-                last_name: user.last_name || "",
-                access_token: token,  // Flutter model key
-                email: user.email || "",
-                date_of_birth: user.date_of_birth || "",
-                gender: String(user.gender || ""),
-                user_type: String(user.user_type || ""),
-                profile_picture: getFullImageUrl(user.profile_picture)
+                user_id: user._id.toString(),   // 🔥 FIXED (IMPORTANT)
+        first_name: user.first_name || "",
+        last_name: user.last_name || "",
+        access_token: token,            // 🔥 MUST MATCH Flutter
+        email: user.email || "",
+        date_of_birth: user.date_of_birth || "",
+        gender: user.gender ? String(user.gender) : "",
+        user_type: String(user.user_type || 3),
+        profile_picture: getFullImageUrl(user.profile_picture) || ""
+
             },
             // Legacy user object for React
             user: { 
                 id: user._id, 
                 email: user.email, 
-                name: user.first_name, 
+                name: user.first_name || user.first_name, 
                 user_type: user.user_type, 
                 role: user.role 
             }
