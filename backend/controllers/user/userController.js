@@ -184,9 +184,9 @@ exports.loginUser = async (req, res) => {
             // 🎯 FLUTTER DATA OBJECT (Matches LoginModel & LoginBloc)
             data: {                   
                 userId: user._id,
-                first_name: user.first_name,
+                first_name: user.first_name || user.name || "",
                 last_name: user.last_name || "",
-                userType: userTypeInt,   // Returns 1, 2, or 3
+                userType: user.role === 'admin' ? 1 : (user.role === 'temple-admin' ? 2 : 3),
                 accessToken: token, 
                 access_token: token,    
                 email: user.email,
