@@ -28,39 +28,94 @@ const getFullImageUrl = (path) => {
  * 1. SIGN UP - Supports Flutter (mobile_number) and React (mobileNumber)
  */
 exports.signUp = async (req, res) => {
-    const mobileNumber = req.body.mobile_number || req.body.mobileNumber;
-    const firstName = req.body.first_name || req.body.firstName;
-    const lastName = req.body.last_name || req.body.lastName || "";
-    const { password } = req.body;
+    const mobileNumber =
+        req.body.mobile_number ||
+        req.body.mobileNumber ||
+        req.body.mobileNo;
+
+    const firstName =
+        req.body.first_name ||
+        req.body.firstName ||
+        req.body.name;
+
+    const lastName =
+        req.body.last_name ||
+        req.body.lastName ||
+        "";
+
+    const password = req.body.password;
+    const confirmPassword =
+        req.body.confirm_password ||
+        req.body.confirmPassword ||
+        req.body.cpassword;
 
     try {
-        const existingUser = await User.findOne({ mobile_number: mobileNumber });
+        if (!mobileNumber || !firstName || !password) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Required fields are missing."
+            });
+        }
+
+        if (confirmPassword && password !== confirmPassword) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Password and confirm password do not match."
+            });
+        }
+
+        const sanitizedMobile = mobileNumber.replace(/\D/g, '').slice(-10);
+
+        const existingUser = await User.findOne({ mobile_number: sanitizedMobile });
         if (existingUser) {
-            return res.status(400).json({ status: "false", success: false, message: "Mobile number already registered." });
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Mobile number already registered."
+            });
         }
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        otpStore.set(mobileNumber, { firstName, lastName, password, otp, expires: Date.now() + 600000 });
+
+        otpStore.set(sanitizedMobile, {
+            firstName,
+            lastName,
+            password,
+            otp,
+            expires: Date.now() + 600000
+        });
 
         try {
             await transporter.sendMail({
                 from: process.env.MAIL_FROM,
-                to: process.env.MAIL_USER, 
+                to: process.env.MAIL_USER,
                 subject: "Your OTP for STM Club",
                 text: `Your OTP is ${otp}`,
             });
         } catch (mailErr) {
-            console.log(`👉 DEBUG OTP for ${mobileNumber}: ${otp}`);
+            console.log(`👉 DEBUG OTP for ${sanitizedMobile}: ${otp}`);
         }
 
-        res.status(200).json({ 
-            status: "true", 
-            success: true, 
+        return res.status(200).json({
+            status: "true",              // Flutter
+            success: true,               // React
             message: "OTP sent successfully",
-            data: { id: 0, first_name: firstName, mobile_number: mobileNumber }
+            data: {
+                id: 0,
+                first_name: firstName,
+                firstName: firstName,
+                mobile_number: sanitizedMobile,
+                mobileNumber: sanitizedMobile
+            }
         });
     } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: error.message
+        });
     }
 };
 
@@ -68,8 +123,17 @@ exports.signUp = async (req, res) => {
  * 2. VERIFY OTP & CREATE USER
  */
 exports.verifyOtp = async (req, res) => {
-    const mobileNumber = req.body.mobile_number || req.body.mobileNumber;
+    const mobileNumberRaw =
+        req.body.mobile_number ||
+        req.body.mobileNumber ||
+        req.body.mobileNo;
+
     const { otp } = req.body;
+
+    const mobileNumber = mobileNumberRaw
+        ? mobileNumberRaw.replace(/\D/g, '').slice(-10)
+        : "";
+
     const data = otpStore.get(mobileNumber);
 
     try {
@@ -79,22 +143,129 @@ exports.verifyOtp = async (req, res) => {
                 last_name: data.lastName,
                 name: `${data.firstName} ${data.lastName || ""}`.trim(),
                 mobile_number: mobileNumber,
-                password: data.password, 
-                user_type: 3, 
+                password: data.password,
+                user_type: 3,
             });
 
             otpStore.delete(mobileNumber);
-            res.status(201).json({ 
-                status: "true", 
-                success: true, 
+
+            return res.status(201).json({
+                status: "true",
+                success: true,
                 message: "Account created successfully!",
-                data: { id: user.sql_id || 0, first_name: user.first_name, mobile_number: user.mobile_number }
+                data: {
+                    id: user.sql_id || 0,
+                    user_id: user._id.toString(),
+                    first_name: user.first_name,
+                    firstName: user.first_name,
+                    mobile_number: user.mobile_number,
+                    mobileNumber: user.mobile_number
+                }
             });
         } else {
-            res.status(400).json({ status: "false", success: false, message: "Invalid or expired OTP" });
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Invalid or expired OTP"
+            });
         }
     } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: error.message
+        });
+    }
+};
+
+exports.resendOtp = async (req, res) => {
+    const mobileNumberRaw =
+        req.body.mobile_number ||
+        req.body.mobileNumber ||
+        req.body.mobileNo;
+
+    const mobileNumber = mobileNumberRaw
+        ? mobileNumberRaw.replace(/\D/g, '').slice(-10)
+        : "";
+
+    try {
+        const existingOtpData = otpStore.get(mobileNumber);
+
+        if (!mobileNumber || !existingOtpData) {
+            return res.status(404).json({
+                status: "false",
+                success: false,
+                message: "User not found or signup session expired."
+            });
+        }
+
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+        otpStore.set(mobileNumber, {
+            ...existingOtpData,
+            otp,
+            expires: Date.now() + 600000
+        });
+
+        try {
+            await transporter.sendMail({
+                from: process.env.MAIL_FROM,
+                to: process.env.MAIL_USER,
+                subject: "Your OTP for STM Club",
+                text: `Your OTP is ${otp}`,
+            });
+        } catch (mailErr) {
+            console.log(`👉 DEBUG RESEND OTP for ${mobileNumber}: ${otp}`);
+        }
+
+        return res.status(200).json({
+            status: "true",
+            success: true,
+            message: "OTP resent successfully"
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: error.message
+        });
+    }
+};
+/** forgotverify otp */
+exports.forgotVerifyOtp = async (req, res) => {
+    try {
+        const userId = req.body.user_id || req.body.userId;
+        const otp = String(req.body.otp || "");
+
+        const user = await User.findOne({
+            $or: [{ sql_id: userId }, { _id: userId }],
+            otp: otp,
+            otp_expires: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Invalid or expired OTP."
+            });
+        }
+
+        return res.status(200).json({
+            status: "true",
+            success: true,
+            message: "OTP verified successfully",
+            data: {
+                user_id: user._id.toString(),
+                first_name: user.first_name || ""
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: error.message
+        });
     }
 };
 
@@ -290,46 +461,105 @@ exports.forgotPassword = async (req, res) => {
  */
 exports.resetPassword = async (req, res) => {
     try {
-        const { otp, password, user_id } = req.body;
-        const user = await User.findOne({ 
-            $or: [{ sql_id: user_id }, { _id: user_id }],
+        const otp = String(req.body.otp || "");
+        const password = req.body.password;
+        const confirmPassword = req.body.confirm_password || req.body.confirmPassword || password;
+        const userId = req.body.user_id || req.body.userId;
+
+        if (!userId || !otp || !password) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Required fields are missing."
+            });
+        }
+
+        if (password !== confirmPassword) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Password and confirm password do not match."
+            });
+        }
+
+        const user = await User.findOne({
+            $or: [{ sql_id: userId }, { _id: userId }],
             otp: otp,
             otp_expires: { $gt: Date.now() }
         });
 
-        if (!user) return res.status(400).json({ status: "false", success: false, message: "Invalid or expired OTP." });
+        if (!user) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Invalid or expired OTP."
+            });
+        }
 
         user.password = password;
         user.otp = undefined;
         user.otp_expires = undefined;
         await user.save();
 
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" });
+        const token = jwt.sign(
+            { id: user._id },
+            process.env.JWT_SECRET,
+            { expiresIn: "1d" }
+        );
 
-        res.status(200).json({ 
-            status: "true", 
+        return res.status(200).json({
+            status: "true",
             success: true,
             message: "Password updated successfully!",
             data: {
-                user_id: user.sql_id || 0,
+                user_id: user._id.toString(),
                 first_name: user.first_name,
                 access_token: token,
                 profile_picture: getFullImageUrl(user.profile_picture)
             }
         });
     } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: error.message
+        });
     }
 };
 
-/**
- * 9. LOGOUT
- */
 exports.logout = async (req, res) => {
     try {
-        res.status(200).json({ status: "true", success: true, message: "Logged out successfully", data: [] });
+        const userId = req.body.user_id || req.body.userId || req.body.all_devices || null;
+
+        // Clear cookies for React if they exist
+        res.clearCookie("accessToken");
+        res.clearCookie("refreshToken");
+
+        // Optional future support if you store refresh tokens / sessions in DB
+        if (userId) {
+            await User.updateOne(
+                { $or: [{ _id: userId }, { sql_id: userId }] },
+                {
+                    $unset: {
+                        refreshToken: 1,
+                        deviceToken: 1
+                    }
+                }
+            ).catch(() => {});
+        }
+
+        return res.status(200).json({
+            status: "true",
+            success: true,
+            message: "Logged out successfully",
+            data: []
+        });
     } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: error.message
+        });
     }
 };
 
@@ -337,6 +567,8 @@ exports.logout = async (req, res) => {
 module.exports = {
     signUp: exports.signUp,
     verifyOtp: exports.verifyOtp,
+    resendOtp: exports.resendOtp,
+    forgotVerifyOtp: exports.forgotVerifyOtp,
     adminSignup: exports.adminSignup,
     login: exports.login,
     checkAuth: exports.checkAuth,

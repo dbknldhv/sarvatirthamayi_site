@@ -14,6 +14,8 @@ router.post('/verify-otp', authController.verifyOtp);
 router.post('/admin/signup', authController.adminSignup);
 router.post('/forgot-password', authController.forgotPassword);
 router.post('/reset-password', authController.resetPassword);
+router.post('/resend-otp', authController.resendOtp);
+router.post('/forgot-verify-otp', authController.forgotVerifyOtp);
 
 // 3. Status Check (Used by React to verify token on mount)
 // Path: /api/admin/auth/check-auth
