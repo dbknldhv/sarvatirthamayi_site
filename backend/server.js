@@ -58,6 +58,9 @@ const allowedOrigins = [
     "http://localhost:5173", 
     "http://127.0.0.1:5173",
     "https://api.sarvatirthamayi.com",
+    "https://sarvatirthamayi.com",        // 🎯 EXACT match for your site
+    "https://admin.sarvatirthamayi.com",  // 🎯 EXACT match for your admin
+    "http://sarvatirthamayi.com",
     process.env.FRONTEND_URL,        // https://sarvatirthamayi.com
     process.env.ADMIN_FRONTEND_URL   // https://admin.sarvatirthamayi.com
 ].filter(Boolean);

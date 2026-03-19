@@ -18,6 +18,7 @@ const transporter = nodemailer.createTransport({
 });
 
 // --- 2. AUTHENTICATION: SIGNUP & SEND OTP ---
+
 exports.signupUser = async (req, res) => {
     try {
         const { first_name, last_name, email, mobile_number, password } = req.body;
@@ -84,6 +85,7 @@ exports.signupUser = async (req, res) => {
         }
 
         res.status(200).json({ 
+            status: "true",
             success: true, 
             message: "OTP generated successfully. Check your email." 
         });
