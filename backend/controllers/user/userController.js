@@ -87,7 +87,16 @@ exports.signupUser = async (req, res) => {
         res.status(200).json({ 
             status: "true",
             success: true, 
-            message: "OTP generated successfully. Check your email." 
+            message: "OTP generated successfully. Check your email." ,
+        data: {
+        id: user._id.toString(), 
+        userId: user._id.toString(),
+        user_id: user._id.toString(),
+        
+        first_name: user.first_name,
+        email: cleanEmail,
+        mobile_number: cleanMobile
+    }
         });
 
     } catch (error) {
