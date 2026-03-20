@@ -220,7 +220,7 @@ exports.resendOtp = async (req, res) => {
         try {
             await transporter.sendMail({
                 from: process.env.MAIL_FROM,
-                to: process.env.MAIL_USER,
+                to: existingOtpData.email,
                 subject: "Your OTP for STM Club",
                 text: `Your OTP is ${otp}`,
             });
