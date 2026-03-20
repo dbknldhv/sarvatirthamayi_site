@@ -142,30 +142,33 @@ const handleDuplicateKeyError = (error, res) => {
  */
 exports.signUp = async (req, res) => {
     try {
-        const { firstName, lastName, email, mobileNumber, password } = extractSignupPayload(req.body);
+        const { firstName, email, mobileNumber, password } = extractSignupPayload(req.body);
         const sanitizedEmail = normalizeEmail(email);
-        const sanitizedMobile = normalizeMobile(mobileNumber);
+        
+        // We handle the +91 from Flutter here
+        const sanitizedMobile = normalizeMobile(mobileNumber); 
 
-        // 1. Database Check (Allows re-signup if unverified)
+        // 1. Find the user in MongoDB
         let user = await User.findOne({ 
             $or: [{ email: sanitizedEmail }, { mobile_number: sanitizedMobile }] 
         });
-
-        if (user && user.is_verified) {
-            return res.status(400).json({ status: "false", message: "User already exists. Please login." });
-        }
 
         const otp = generateOtp();
         const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
         if (user) {
+            // 🎯 THE FIX: If user exists, update them and reset verification.
+            // This prevents the "User already exists" error you were seeing.
+            user.first_name = firstName;
+            user.password = password; 
             user.otp = otp;
             user.otp_expires = otpExpires;
+            user.is_verified = false; 
             await user.save();
         } else {
+            // Create new user
             user = await User.create({
                 first_name: firstName,
-                last_name: lastName || "",
                 email: sanitizedEmail,
                 mobile_number: sanitizedMobile,
                 password: password,
@@ -176,30 +179,34 @@ exports.signUp = async (req, res) => {
             });
         }
 
+        // Send OTP
         try {
             await sendOtpEmail(sanitizedEmail, otp);
         } catch (mailErr) {
             console.log("OTP for debug:", otp);
         }
 
-        // --- 🎯 THE FLUTTER-FIX RESPONSE ---
-        // We provide 'id', 'userId', and 'user_id' so your 
-        // existing Flutter model never fails to find the key.
+        // --- 🎯 MIRROR RESPONSE FOR YOUR signup_screen.dart ---
         return res.status(200).json({
             status: "true",
             success: true,
-            message: "OTP generated successfully. Check your email.",
+            message: "OTP sent successfully",
             data: { 
-                id: user._id.toString(),      // 👈 Flutter: response.data?.id
-                userId: user._id.toString(),  // 👈 Flutter: response.data?.userId
-                user_id: user._id.toString(), // 👈 Flutter: response.data?.user_id
-                first_name: user.first_name,
-                email: sanitizedEmail,
-                mobile_number: sanitizedMobile
+                // Matches: state.signupModel?.data?.id
+                id: user._id.toString(),
+                userId: user._id.toString(),
+                
+                // Matches: state.signupModel?.data?.mobileNumber
+                mobileNumber: user.mobile_number, 
+                mobile_number: user.mobile_number,
+                
+                first_name: user.first_name
             }
         });
+
     } catch (error) {
-        res.status(500).json({ status: "false", message: error.message });
+        console.error("Signup Error:", error);
+        res.status(500).json({ status: "false", message: "Server error. Please try again." });
     }
 };
 /**
