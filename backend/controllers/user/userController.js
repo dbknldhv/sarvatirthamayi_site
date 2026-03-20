@@ -28,7 +28,7 @@ exports.signupUser = async (req, res) => {
             return res.status(400).json({ success: false, message: "Required fields are missing." });
         }
 
-        const cleanMobile = mobile_number.trim();
+        const cleanMobile = mobile_number.replace(/\D/g, '').slice(-10);
         const cleanEmail = email.toLowerCase().trim();
 
         // Check for existing user
@@ -112,7 +112,10 @@ exports.verifyOtp = async (req, res) => {
         const { mobile_number, otp } = req.body;
         if (!mobile_number || !otp) return res.status(400).json({ success: false, message: "Mobile and OTP are required." });
 
-        const user = await User.findOne({ mobile_number: mobile_number.trim(), otp });
+        const cleanMobile = mobile_number.replace(/\D/g, '').slice(-10);
+        const user = await User.findOne({ mobile_number: cleanMobile, otp });
+
+        //const user = await User.findOne({ mobile_number: mobile_number.trim(), otp });
 
         if (!user) return res.status(400).json({ success: false, message: "Invalid verification code." });
         if (new Date() > user.otp_expires) return res.status(400).json({ success: false, message: "Code expired." });
@@ -141,7 +144,7 @@ exports.resendOtp = async (req, res) => {
         await user.save();
 
         try {
-            const recipientEmail = cleanEmail || user.email;
+            const recipientEmail = user.email || process.env.MAIL_USER;
             await transporter.sendMail({
                 from: process.env.MAIL_FROM,
                 to: recipientEmail,
@@ -161,8 +164,9 @@ exports.resendOtp = async (req, res) => {
 exports.loginUser = async (req, res) => {
     try {
         const { mobile, password } = req.body;
-        const user = await User.findOne({ mobile_number: mobile?.trim() });
-
+        //const user = await User.findOne({ mobile_number: mobile?.trim() });
+        const cleanMobile = mobile ? mobile.replace(/\D/g, '').slice(-10) : "";
+        const user = await User.findOne({ mobile_number: cleanMobile });
         if (!user) return res.status(401).json({ success: false, message: "User not found." });
         if (!user.is_verified) return res.status(401).json({ success: false, message: "Account unverified." });
 

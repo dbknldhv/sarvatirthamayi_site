@@ -38,6 +38,10 @@ exports.signUp = async (req, res) => {
         req.body.firstName ||
         req.body.name;
 
+    const email =
+    req.body.email ||
+    req.body.user_email ||
+    "";
     const lastName =
         req.body.last_name ||
         req.body.lastName ||
@@ -50,7 +54,7 @@ exports.signUp = async (req, res) => {
         req.body.cpassword;
 
     try {
-        if (!mobileNumber || !firstName || !password) {
+        if (!mobileNumber || !firstName || !password || !email) {
             return res.status(400).json({
                 status: "false",
                 success: false,
@@ -82,6 +86,7 @@ exports.signUp = async (req, res) => {
         otpStore.set(sanitizedMobile, {
             firstName,
             lastName,
+            email: email.toLowerCase().trim(),
             password,
             otp,
             expires: Date.now() + 600000
@@ -90,7 +95,7 @@ exports.signUp = async (req, res) => {
         try {
             await transporter.sendMail({
                 from: process.env.MAIL_FROM,
-                to: process.env.MAIL_USER,
+                to: email.toLowerCase().trim(),  // user email
                 subject: "Your OTP for STM Club",
                 text: `Your OTP is ${otp}`,
             });
@@ -103,7 +108,9 @@ exports.signUp = async (req, res) => {
             success: true,               // React
             message: "OTP sent successfully",
             data: {
-                id: 0,
+                id: sanitizedMobile,
+                user_id: sanitizedMobile,
+                userId: sanitizedMobile,
                 first_name: firstName,
                 firstName: firstName,
                 mobile_number: sanitizedMobile,
@@ -142,9 +149,11 @@ exports.verifyOtp = async (req, res) => {
                 first_name: data.firstName,
                 last_name: data.lastName,
                 name: `${data.firstName} ${data.lastName || ""}`.trim(),
+                email: data.email,
                 mobile_number: mobileNumber,
                 password: data.password,
                 user_type: 3,
+                is_verified: true,
             });
 
             otpStore.delete(mobileNumber);
@@ -154,8 +163,9 @@ exports.verifyOtp = async (req, res) => {
                 success: true,
                 message: "Account created successfully!",
                 data: {
-                    id: user.sql_id || 0,
+                    id: user._id.toString(),
                     user_id: user._id.toString(),
+                    userId: user._id.toString(),
                     first_name: user.first_name,
                     firstName: user.first_name,
                     mobile_number: user.mobile_number,
@@ -237,8 +247,16 @@ exports.forgotVerifyOtp = async (req, res) => {
         const userId = req.body.user_id || req.body.userId;
         const otp = String(req.body.otp || "");
 
+        if (!userId || !otp) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "User id and OTP are required."
+            });
+        }
+
         const user = await User.findOne({
-            $or: [{ sql_id: userId }, { _id: userId }],
+            _id: userId,
             otp: otp,
             otp_expires: { $gt: Date.now() }
         });
@@ -256,8 +274,11 @@ exports.forgotVerifyOtp = async (req, res) => {
             success: true,
             message: "OTP verified successfully",
             data: {
+                id: user._id.toString(),
                 user_id: user._id.toString(),
-                first_name: user.first_name || ""
+                userId: user._id.toString(),
+                first_name: user.first_name || "",
+                firstName: user.first_name || ""
             }
         });
     } catch (error) {
@@ -374,14 +395,16 @@ exports.login = async (req, res) => {
             redirectPath: paths[user.user_type] || "/",
             data: {                   // Flutter Data Object
                 user_id: user._id.toString(),   // 🔥 FIXED (IMPORTANT)
-        first_name: user.first_name || "",
-        last_name: user.last_name || "",
-        access_token: token,            // 🔥 MUST MATCH Flutter
-        email: user.email || "",
-        date_of_birth: user.date_of_birth || "",
-        gender: user.gender ? String(user.gender) : "",
-        user_type: String(user.user_type || 3),
-        profile_picture: getFullImageUrl(user.profile_picture) || ""
+                userId: user._id.toString(),
+                first_name: user.first_name || "",
+                firstName: user.first_name || "",
+                last_name: user.last_name || "",
+                access_token: token,            // 🔥 MUST MATCH Flutter
+                email: user.email || "",
+                date_of_birth: user.date_of_birth || "",
+                gender: user.gender ? String(user.gender) : "",
+                user_type: String(user.user_type || 3),
+                profile_picture: getFullImageUrl(user.profile_picture) || ""
 
             },
             // Legacy user object for React
@@ -435,27 +458,49 @@ exports.checkAuth = async (req, res) => {
  */
 exports.forgotPassword = async (req, res) => {
     try {
-        const mobileNumber = req.body.mobile_number || req.body.mobileNumber;
+        const email = (req.body.email || "").toLowerCase().trim();
+        const mobileNumberRaw = req.body.mobile_number || req.body.mobileNumber;
+        const mobileNumber = mobileNumberRaw
+            ? mobileNumberRaw.replace(/\D/g, '').slice(-10)
+            : "";
+
         const user = await User.findOne({ mobile_number: mobileNumber });
 
-        if (!user) return res.status(404).json({ status: "false", success: false, message: "No account found." });
+        if (!user) {
+            return res.status(404).json({
+                status: "false",
+                success: false,
+                message: "No account found."
+            });
+        }
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         user.otp = otp;
         user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
         await user.save();
 
-        res.status(200).json({ 
-            status: "true", 
+        return res.status(200).json({
+            status: "true",
             success: true,
             message: "OTP sent successfully",
-            data: { id: user.sql_id || 0, first_name: user.first_name, mobile_number: user.mobile_number }
+            data: {
+                id: user._id.toString(),
+                user_id: user._id.toString(),
+                userId: user._id.toString(),
+                first_name: user.first_name,
+                firstName: user.first_name,
+                mobile_number: user.mobile_number,
+                mobileNumber: user.mobile_number
+            }
         });
     } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: error.message
+        });
     }
 };
-
 /**
  * 8. RESET PASSWORD
  */
@@ -463,14 +508,23 @@ exports.resetPassword = async (req, res) => {
     try {
         const otp = String(req.body.otp || "");
         const password = req.body.password;
-        const confirmPassword = req.body.confirm_password || req.body.confirmPassword || password;
-        const userId = req.body.user_id || req.body.userId;
+        const confirmPassword =
+            req.body.confirm_password ||
+            req.body.confirmPassword ||
+            password;
 
-        if (!userId || !otp || !password) {
+        const userId = req.body.user_id || req.body.userId;
+        const email = (req.body.email || "").toLowerCase().trim();
+        const mobileNumberRaw = req.body.mobile_number || req.body.mobileNumber || "";
+        const mobileNumber = mobileNumberRaw
+            ? mobileNumberRaw.replace(/\D/g, '').slice(-10)
+            : "";
+
+        if ((!userId && !email && !mobileNumber) || !otp || !password) {
             return res.status(400).json({
                 status: "false",
                 success: false,
-                message: "Required fields are missing."
+                message: "User id, email, or mobile number along with OTP and password is required."
             });
         }
 
@@ -482,11 +536,20 @@ exports.resetPassword = async (req, res) => {
             });
         }
 
-        const user = await User.findOne({
-            $or: [{ sql_id: userId }, { _id: userId }],
+        let query = {
             otp: otp,
             otp_expires: { $gt: Date.now() }
-        });
+        };
+
+        if (userId) {
+            query._id = userId;
+        } else if (email) {
+            query.email = email;
+        } else if (mobileNumber) {
+            query.mobile_number = mobileNumber;
+        }
+
+        const user = await User.findOne(query);
 
         if (!user) {
             return res.status(400).json({
@@ -502,7 +565,7 @@ exports.resetPassword = async (req, res) => {
         await user.save();
 
         const token = jwt.sign(
-            { id: user._id },
+            { id: user._id, user_type: user.user_type, role: user.role },
             process.env.JWT_SECRET,
             { expiresIn: "1d" }
         );
@@ -512,10 +575,18 @@ exports.resetPassword = async (req, res) => {
             success: true,
             message: "Password updated successfully!",
             data: {
+                id: user._id.toString(),
                 user_id: user._id.toString(),
-                first_name: user.first_name,
+                userId: user._id.toString(),
+                first_name: user.first_name || "",
+                firstName: user.first_name || "",
+                last_name: user.last_name || "",
+                email: user.email || "",
+                mobile_number: user.mobile_number || "",
+                mobileNumber: user.mobile_number || "",
+                user_type: String(user.user_type || 3),
                 access_token: token,
-                profile_picture: getFullImageUrl(user.profile_picture)
+                profile_picture: getFullImageUrl(user.profile_picture) || ""
             }
         });
     } catch (error) {
