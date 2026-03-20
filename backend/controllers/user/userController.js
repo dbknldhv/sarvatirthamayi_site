@@ -49,6 +49,7 @@ exports.signupUser = async (req, res) => {
             user.password = password; 
             user.otp = otp;
             user.otp_expires = otpExpires;
+            user.email = cleanEmail;
         } else {
             user = new User({
                 first_name,
@@ -94,7 +95,7 @@ exports.signupUser = async (req, res) => {
         user_id: user._id.toString(),
         
         first_name: user.first_name,
-        email: cleanEmail,
+        email: cleanEmail || user.email,
         mobile_number: cleanMobile
     }
         });
@@ -140,9 +141,10 @@ exports.resendOtp = async (req, res) => {
         await user.save();
 
         try {
+            const recipientEmail = cleanEmail || user.email;
             await transporter.sendMail({
                 from: process.env.MAIL_FROM,
-                to: user.email,
+                to: recipientEmail,
                 subject: "New Verification Code",
                 html: `<h1>${newOtp}</h1>`
             });
