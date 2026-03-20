@@ -2,15 +2,15 @@ const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 
-// OTP Store (Using a Map)
+// In-memory OTP store
 const otpStore = new Map();
 
-// Email Configuration
+// Email transport
 const transporter = nodemailer.createTransport({
     host: process.env.MAIL_HOST,
     port: process.env.MAIL_PORT,
-    service: 'gmail',
-    secure: process.env.MAIL_SECURE === 'true' || process.env.MAIL_PORT == 465,
+    service: "gmail",
+    secure: process.env.MAIL_SECURE === "true" || String(process.env.MAIL_PORT) === "465",
     auth: {
         user: process.env.MAIL_USER,
         pass: process.env.MAIL_PASS,
@@ -18,51 +18,160 @@ const transporter = nodemailer.createTransport({
     tls: { rejectUnauthorized: false }
 });
 
-// Helper to format Image URLs for Flutter
+// -------------------- Helpers --------------------
+
 const getFullImageUrl = (path) => {
     if (!path) return "";
-    return `https://api.sarvatirthamayi.com/${path.replace(/\\/g, '/')}`;
+    return `https://api.sarvatirthamayi.com/${String(path).replace(/\\/g, "/")}`;
 };
 
+const normalizeEmail = (email) => String(email || "").toLowerCase().trim();
+
+const normalizeMobile = (mobile) => {
+    const digits = String(mobile || "").replace(/\D/g, "");
+    return digits ? digits.slice(-10) : "";
+};
+
+const extractSignupPayload = (body = {}) => {
+    return {
+        firstName: body.first_name || body.firstName || body.name || "",
+        lastName: body.last_name || body.lastName || "",
+        email: body.email || body.user_email || "",
+        mobileNumber: body.mobile_number || body.mobileNumber || body.mobileNo || "",
+        password: body.password || "",
+        confirmPassword:
+            body.confirm_password ||
+            body.confirmPassword ||
+            body.password_confirmation ||
+            body.cpassword ||
+            ""
+    };
+};
+
+const extractMobileFromBody = (body = {}) =>
+    body.mobile_number || body.mobileNumber || body.mobileNo || "";
+
+const extractUserIdFromBody = (body = {}) =>
+    body.user_id || body.userId || "";
+
+const generateOtp = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+const generateAccessToken = (user) =>
+    jwt.sign(
+        { id: user._id, user_type: user.user_type, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: "1d" }
+    );
+
+const sendOtpEmail = async (email, otp, subject = "Your OTP for STM Club") => {
+    await transporter.sendMail({
+        from: process.env.MAIL_FROM,
+        to: email,
+        subject,
+        text: `Your OTP is ${otp}`,
+    });
+};
+
+const buildAuthUserResponse = (user, token = "") => ({
+    id: user._id.toString(),
+    user_id: user._id.toString(),
+    userId: user._id.toString(),
+    first_name: user.first_name || "",
+    firstName: user.first_name || "",
+    last_name: user.last_name || "",
+    email: user.email || "",
+    mobile_number: user.mobile_number || "",
+    mobileNumber: user.mobile_number || "",
+    user_type: String(user.user_type || 3),
+    access_token: token || "",
+    profile_picture: getFullImageUrl(user.profile_picture) || ""
+});
+
+const buildTempSignupResponse = (firstName, mobileNumber) => ({
+    id: mobileNumber,
+    user_id: mobileNumber,
+    userId: mobileNumber,
+    first_name: firstName,
+    firstName: firstName,
+    mobile_number: mobileNumber,
+    mobileNumber: mobileNumber
+});
+
+const handleDuplicateKeyError = (error, res) => {
+    if (error?.code !== 11000) return false;
+
+    if (error.keyPattern?.email) {
+        res.status(400).json({
+            status: "false",
+            success: false,
+            message: "Email already registered."
+        });
+        return true;
+    }
+
+    if (error.keyPattern?.mobile_number) {
+        res.status(400).json({
+            status: "false",
+            success: false,
+            message: "Mobile number already registered."
+        });
+        return true;
+    }
+
+    if (error.keyPattern?.sql_id) {
+        res.status(400).json({
+            status: "false",
+            success: false,
+            message: "Duplicate sql_id detected. Remove the unique sql_id index."
+        });
+        return true;
+    }
+
+    res.status(400).json({
+        status: "false",
+        success: false,
+        message: "Duplicate record found."
+    });
+    return true;
+};
+
+// -------------------- Controllers --------------------
+
 /**
- * 1. SIGN UP - Supports Flutter (mobile_number) and React (mobileNumber)
+ * SIGN UP
+ * Sends OTP and stores signup session in memory
  */
 exports.signUp = async (req, res) => {
-    const mobileNumber =
-        req.body.mobile_number ||
-        req.body.mobileNumber ||
-        req.body.mobileNo;
-
-    const firstName =
-        req.body.first_name ||
-        req.body.firstName ||
-        req.body.name;
-
-    const email =
-    req.body.email ||
-    req.body.user_email ||
-    "";
-    const lastName =
-        req.body.last_name ||
-        req.body.lastName ||
-        "";
-
-    const password = req.body.password;
-    const confirmPassword =
-        req.body.confirm_password ||
-        req.body.confirmPassword ||
-        req.body.cpassword;
-
     try {
-        if (!mobileNumber || !firstName || !password || !email) {
+        const {
+            firstName,
+            lastName,
+            email,
+            mobileNumber,
+            password,
+            confirmPassword
+        } = extractSignupPayload(req.body);
+
+        const sanitizedEmail = normalizeEmail(email);
+        const sanitizedMobile = normalizeMobile(mobileNumber);
+
+        if (!firstName || !sanitizedEmail || !sanitizedMobile || !password) {
             return res.status(400).json({
                 status: "false",
                 success: false,
-                message: "Required fields are missing."
+                message: "First name, email, mobile number, and password are required."
             });
         }
 
-        if (confirmPassword && password !== confirmPassword) {
+        if (!confirmPassword) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Confirm password is required."
+            });
+        }
+
+        if (password !== confirmPassword) {
             return res.status(400).json({
                 status: "false",
                 success: false,
@@ -70,138 +179,187 @@ exports.signUp = async (req, res) => {
             });
         }
 
-        const sanitizedMobile = mobileNumber.replace(/\D/g, '').slice(-10);
-
-        const existingUser = await User.findOne({ mobile_number: sanitizedMobile });
-        if (existingUser) {
+        if (!/^\S+@\S+\.\S+$/.test(sanitizedEmail)) {
             return res.status(400).json({
                 status: "false",
                 success: false,
-                message: "Mobile number already registered."
+                message: "Enter a valid email address."
             });
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        if (!/^\d{10}$/.test(sanitizedMobile)) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Enter a valid mobile number."
+            });
+        }
+
+        const existingUser = await User.findOne({
+            $or: [
+                { email: sanitizedEmail },
+                { mobile_number: sanitizedMobile }
+            ]
+        });
+
+        if (existingUser) {
+            if (existingUser.email === sanitizedEmail) {
+                return res.status(400).json({
+                    status: "false",
+                    success: false,
+                    message: "Email already registered."
+                });
+            }
+
+            if (existingUser.mobile_number === sanitizedMobile) {
+                return res.status(400).json({
+                    status: "false",
+                    success: false,
+                    message: "Mobile number already registered."
+                });
+            }
+        }
+
+        const otp = generateOtp();
 
         otpStore.set(sanitizedMobile, {
             firstName,
             lastName,
-            email: email.toLowerCase().trim(),
+            email: sanitizedEmail,
             password,
             otp,
-            expires: Date.now() + 600000
+            expires: Date.now() + 10 * 60 * 1000
         });
 
         try {
-            await transporter.sendMail({
-                from: process.env.MAIL_FROM,
-                to: email.toLowerCase().trim(),  // user email
-                subject: "Your OTP for STM Club",
-                text: `Your OTP is ${otp}`,
-            });
+            await sendOtpEmail(sanitizedEmail, otp);
         } catch (mailErr) {
-            console.log(`👉 DEBUG OTP for ${sanitizedMobile}: ${otp}`);
+            console.log(`👉 DEBUG SIGNUP OTP for ${sanitizedMobile}: ${otp}`);
         }
 
         return res.status(200).json({
-            status: "true",              // Flutter
-            success: true,               // React
+            status: "true",
+            success: true,
             message: "OTP sent successfully",
-            data: {
-                id: sanitizedMobile,
-                user_id: sanitizedMobile,
-                userId: sanitizedMobile,
-                first_name: firstName,
-                firstName: firstName,
-                mobile_number: sanitizedMobile,
-                mobileNumber: sanitizedMobile
-            }
+            data: buildTempSignupResponse(firstName, sanitizedMobile)
         });
     } catch (error) {
         return res.status(500).json({
             status: "false",
             success: false,
-            message: error.message
+            message: error.message || "Server error"
         });
     }
 };
 
 /**
- * 2. VERIFY OTP & CREATE USER
+ * VERIFY OTP
+ * Creates final user after OTP validation
  */
 exports.verifyOtp = async (req, res) => {
-    const mobileNumberRaw =
-        req.body.mobile_number ||
-        req.body.mobileNumber ||
-        req.body.mobileNo;
-
-    const { otp } = req.body;
-
-    const mobileNumber = mobileNumberRaw
-        ? mobileNumberRaw.replace(/\D/g, '').slice(-10)
-        : "";
-
-    const data = otpStore.get(mobileNumber);
-
     try {
-        if (data && data.otp === otp && data.expires > Date.now()) {
-            const user = await User.create({
-                first_name: data.firstName,
-                last_name: data.lastName,
-                name: `${data.firstName} ${data.lastName || ""}`.trim(),
-                email: data.email,
-                mobile_number: mobileNumber,
-                password: data.password,
-                user_type: 3,
-                is_verified: true,
-            });
+        const mobileNumber = normalizeMobile(extractMobileFromBody(req.body));
+        const otp = String(req.body.otp || "").trim();
 
-            otpStore.delete(mobileNumber);
-
-            return res.status(201).json({
-                status: "true",
-                success: true,
-                message: "Account created successfully!",
-                data: {
-                    id: user._id.toString(),
-                    user_id: user._id.toString(),
-                    userId: user._id.toString(),
-                    first_name: user.first_name,
-                    firstName: user.first_name,
-                    mobile_number: user.mobile_number,
-                    mobileNumber: user.mobile_number
-                }
+        if (!mobileNumber || !otp) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Mobile number and OTP are required."
             });
-        } else {
+        }
+
+        const pendingSignup = otpStore.get(mobileNumber);
+
+        if (!pendingSignup || pendingSignup.otp !== otp || pendingSignup.expires <= Date.now()) {
             return res.status(400).json({
                 status: "false",
                 success: false,
                 message: "Invalid or expired OTP"
             });
         }
+
+        const existingUser = await User.findOne({
+            $or: [
+                { email: pendingSignup.email },
+                { mobile_number: mobileNumber }
+            ]
+        });
+
+        if (existingUser) {
+            otpStore.delete(mobileNumber);
+
+            if (existingUser.email === pendingSignup.email) {
+                return res.status(400).json({
+                    status: "false",
+                    success: false,
+                    message: "Email already registered."
+                });
+            }
+
+            if (existingUser.mobile_number === mobileNumber) {
+                return res.status(400).json({
+                    status: "false",
+                    success: false,
+                    message: "Mobile number already registered."
+                });
+            }
+        }
+
+        let user;
+        try {
+            user = await User.create({
+                first_name: pendingSignup.firstName,
+                last_name: pendingSignup.lastName,
+                name: `${pendingSignup.firstName} ${pendingSignup.lastName || ""}`.trim(),
+                email: pendingSignup.email,
+                mobile_number: mobileNumber,
+                password: pendingSignup.password,
+                user_type: 3,
+                is_verified: true
+            });
+        } catch (error) {
+            if (handleDuplicateKeyError(error, res)) return;
+            throw error;
+        }
+
+        otpStore.delete(mobileNumber);
+
+        const token = generateAccessToken(user);
+
+        return res.status(201).json({
+            status: "true",
+            success: true,
+            message: "Account created successfully!",
+            data: buildAuthUserResponse(user, token)
+        });
     } catch (error) {
         return res.status(500).json({
             status: "false",
             success: false,
-            message: error.message
+            message: error.message || "Server error"
         });
     }
 };
 
+/**
+ * RESEND OTP
+ */
 exports.resendOtp = async (req, res) => {
-    const mobileNumberRaw =
-        req.body.mobile_number ||
-        req.body.mobileNumber ||
-        req.body.mobileNo;
-
-    const mobileNumber = mobileNumberRaw
-        ? mobileNumberRaw.replace(/\D/g, '').slice(-10)
-        : "";
-
     try {
-        const existingOtpData = otpStore.get(mobileNumber);
+        const mobileNumber = normalizeMobile(extractMobileFromBody(req.body));
 
-        if (!mobileNumber || !existingOtpData) {
+        if (!mobileNumber) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Mobile number is required."
+            });
+        }
+
+        const pendingSignup = otpStore.get(mobileNumber);
+
+        if (!pendingSignup) {
             return res.status(404).json({
                 status: "false",
                 success: false,
@@ -209,21 +367,16 @@ exports.resendOtp = async (req, res) => {
             });
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otp = generateOtp();
 
         otpStore.set(mobileNumber, {
-            ...existingOtpData,
+            ...pendingSignup,
             otp,
-            expires: Date.now() + 600000
+            expires: Date.now() + 10 * 60 * 1000
         });
 
         try {
-            await transporter.sendMail({
-                from: process.env.MAIL_FROM,
-                to: existingOtpData.email,
-                subject: "Your OTP for STM Club",
-                text: `Your OTP is ${otp}`,
-            });
+            await sendOtpEmail(pendingSignup.email, otp);
         } catch (mailErr) {
             console.log(`👉 DEBUG RESEND OTP for ${mobileNumber}: ${otp}`);
         }
@@ -237,15 +390,18 @@ exports.resendOtp = async (req, res) => {
         return res.status(500).json({
             status: "false",
             success: false,
-            message: error.message
+            message: error.message || "Server error"
         });
     }
 };
-/** forgotverify otp */
+
+/**
+ * FORGOT VERIFY OTP
+ */
 exports.forgotVerifyOtp = async (req, res) => {
     try {
-        const userId = req.body.user_id || req.body.userId;
-        const otp = String(req.body.otp || "");
+        const userId = extractUserIdFromBody(req.body);
+        const otp = String(req.body.otp || "").trim();
 
         if (!userId || !otp) {
             return res.status(400).json({
@@ -257,7 +413,7 @@ exports.forgotVerifyOtp = async (req, res) => {
 
         const user = await User.findOne({
             _id: userId,
-            otp: otp,
+            otp,
             otp_expires: { $gt: Date.now() }
         });
 
@@ -285,186 +441,209 @@ exports.forgotVerifyOtp = async (req, res) => {
         return res.status(500).json({
             status: "false",
             success: false,
-            message: error.message
+            message: error.message || "Server error"
         });
     }
 };
 
 /**
- * 3. ADMIN & TEMPLE ADMIN SIGNUP (React Admin Only)
+ * ADMIN SIGNUP
  */
 exports.adminSignup = async (req, res) => {
     try {
-        const { first_name, last_name, email, password, user_type, temple_id, mobile_number } = req.body;
+        const first_name = req.body.first_name || "";
+        const last_name = req.body.last_name || "";
+        const email = normalizeEmail(req.body.email);
+        const password = req.body.password || "";
+        const user_type = Number(req.body.user_type);
+        const temple_id = req.body.temple_id || null;
+        const mobile_number = normalizeMobile(req.body.mobile_number);
 
         if (!first_name || !email || !password || !user_type || !mobile_number) {
-            return res.status(400).json({ success: false, message: "Missing required fields." });
+            return res.status(400).json({
+                success: false,
+                message: "Missing required fields."
+            });
         }
 
-        const userExists = await User.findOne({ $or: [{ email: email.toLowerCase() }, { mobile_number }] });
-        if (userExists) {
-            return res.status(400).json({ success: false, message: "Email or Mobile already in use" });
+        const existingUser = await User.findOne({
+            $or: [{ email }, { mobile_number }]
+        });
+
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: "Email or mobile already in use"
+            });
         }
 
         const user = await User.create({
             first_name,
             last_name,
             name: `${first_name} ${last_name || ""}`.trim(),
-            email: email.toLowerCase(),
+            email,
             mobile_number,
-            password, 
-            user_type: Number(user_type), 
-            temple_id: user_type == 2 ? temple_id : null,
+            password,
+            user_type,
+            temple_id: user_type === 2 ? temple_id : null
         });
 
-        const token = jwt.sign(
-            { id: user._id, user_type: user.user_type, role: user.role },
-            process.env.JWT_SECRET,
-            { expiresIn: "1d" }
-        );
+        const token = generateAccessToken(user);
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             token,
-            user: { id: user._id, name: user.first_name, email: user.email, user_type: user.user_type },
+            user: {
+                id: user._id,
+                name: user.first_name,
+                email: user.email,
+                user_type: user.user_type
+            },
             redirectPath: user.user_type === 1 ? "/admin/dashboard" : "/temple-admin/dashboard"
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        if (handleDuplicateKeyError(error, res)) return;
+
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Server error"
+        });
     }
 };
 
 /**
- * 4. UNIFIED LOGIN (React & Flutter)
- */
-/**
- * UNIFIED LOGIN - Supports React (mobileNumber) & Flutter (mobile_number)
- * Handles country code stripping (+91) for Flutter requests
+ * LOGIN
  */
 exports.login = async (req, res) => {
     try {
-        const { email, password } = req.body;
-        
-        // 1. Extract raw mobile from either Flutter or React key
-        let rawMobile = req.body.mobile_number || req.body.mobileNumber;
-        let user;
+        const email = normalizeEmail(req.body.email);
+        const rawMobile = extractMobileFromBody(req.body);
+        const mobile_number = normalizeMobile(rawMobile);
+        const password = req.body.password || "";
 
-        if (email) {
-            user = await User.findOne({ email: email.toLowerCase() });
-        } else if (rawMobile) {
-            // 2. SANITIZE: Remove '+91' or any non-digits and keep the last 10 digits
-            // This ensures +919182635762 becomes 9182635762 to match your DB
-            const sanitizedMobile = rawMobile.replace(/\D/g, '').slice(-10);
-            
-            user = await User.findOne({ mobile_number: sanitizedMobile });
+        if ((!email && !mobile_number) || !password) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Email or mobile number and password are required."
+            });
         }
 
-        // 3. VALIDATION
+        let user = null;
+
+        if (email) {
+            user = await User.findOne({ email });
+        } else if (mobile_number) {
+            user = await User.findOne({ mobile_number });
+        }
+
         if (!user) {
-            return res.status(401).json({ 
-                status: "false", 
-                success: false, 
-                message: "Invalid credentials (User not found)." 
+            return res.status(401).json({
+                status: "false",
+                success: false,
+                message: "Invalid credentials."
             });
         }
 
         const isMatch = await user.matchPassword(password);
+
         if (!isMatch) {
-            return res.status(401).json({ 
-                status: "false", 
-                success: false, 
-                message: "Invalid credentials (Password mismatch)." 
+            return res.status(401).json({
+                status: "false",
+                success: false,
+                message: "Invalid credentials."
             });
         }
 
-        // 4. TOKEN GENERATION
-        const token = jwt.sign(
-            { id: user._id, user_type: user.user_type, role: user.role },
-            process.env.JWT_SECRET,
-            { expiresIn: "1d" }
-        );
+        const token = generateAccessToken(user);
+        const redirectPaths = { 1: "/admin/dashboard", 2: "/temple-admin/dashboard", 3: "/" };
 
-        const paths = { 1: "/admin/dashboard", 2: "/temple-admin/dashboard", 3: "/" };
-
-        // 5. RESPONSE (Unified for Flutter Models & React Admin)
-        res.status(200).json({
-            status: "true",           // Required by Flutter LoginModel
-            success: true,            // Required by React Admin
+        return res.status(200).json({
+            status: "true",
+            success: true,
             message: "Login Successful",
-            token: token,             // React legacy key
-            redirectPath: paths[user.user_type] || "/",
-            data: {                   // Flutter Data Object
-                user_id: user._id.toString(),   // 🔥 FIXED (IMPORTANT)
-                userId: user._id.toString(),
-                first_name: user.first_name || "",
-                firstName: user.first_name || "",
-                last_name: user.last_name || "",
-                access_token: token,            // 🔥 MUST MATCH Flutter
-                email: user.email || "",
-                date_of_birth: user.date_of_birth || "",
-                gender: user.gender ? String(user.gender) : "",
-                user_type: String(user.user_type || 3),
-                profile_picture: getFullImageUrl(user.profile_picture) || ""
-
-            },
-            // Legacy user object for React
-            user: { 
-                id: user._id, 
-                email: user.email, 
-                name: user.first_name || user.first_name, 
-                user_type: user.user_type, 
-                role: user.role 
+            token,
+            redirectPath: redirectPaths[user.user_type] || "/",
+            data: buildAuthUserResponse(user, token),
+            user: {
+                id: user._id,
+                email: user.email,
+                name: user.first_name || "",
+                user_type: user.user_type,
+                role: user.role
             }
         });
-    } catch (err) {
-        console.error("Login Error:", err);
-        res.status(500).json({ status: "false", success: false, message: "Server error" });
+    } catch (error) {
+        console.error("Login Error:", error);
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: "Server error"
+        });
     }
 };
 
 /**
- * 5. REFRESH ACCESS TOKEN
+ * REFRESH ACCESS TOKEN
  */
 exports.refreshAccessToken = async (req, res) => {
     try {
-        // Typically, checkAuth middleware already validates the token.
-        // We return a simple success if the user reached this point.
-        res.status(200).json({ 
-            status: "true", 
-            success: true, 
+        return res.status(200).json({
+            status: "true",
+            success: true,
             message: "Token is valid",
-            data: [] 
+            data: []
         });
     } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: error.message || "Server error"
+        });
     }
 };
 
 /**
- * 6. CHECK AUTH (Used by React Frontend)
+ * CHECK AUTH
  */
 exports.checkAuth = async (req, res) => {
     try {
         const user = await User.findById(req.user.id).select("-password");
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
-        res.status(200).json({ success: true, user });
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            user
+        });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Server Error" });
+        return res.status(500).json({
+            success: false,
+            message: "Server Error"
+        });
     }
 };
 
 /**
- * 7. FORGOT PASSWORD
+ * FORGOT PASSWORD
  */
 exports.forgotPassword = async (req, res) => {
     try {
-        const email = (req.body.email || "").toLowerCase().trim();
-        const mobileNumberRaw = req.body.mobile_number || req.body.mobileNumber;
-        const mobileNumber = mobileNumberRaw
-            ? mobileNumberRaw.replace(/\D/g, '').slice(-10)
-            : "";
+        const email = normalizeEmail(req.body.email);
+        const mobile_number = normalizeMobile(extractMobileFromBody(req.body));
 
-        const user = await User.findOne({ mobile_number: mobileNumber });
+        let user = null;
+
+        if (email) {
+            user = await User.findOne({ email });
+        } else if (mobile_number) {
+            user = await User.findOne({ mobile_number });
+        }
 
         if (!user) {
             return res.status(404).json({
@@ -474,10 +653,20 @@ exports.forgotPassword = async (req, res) => {
             });
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otp = generateOtp();
         user.otp = otp;
         user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
         await user.save();
+
+        try {
+            if (user.email) {
+                await sendOtpEmail(user.email, otp, "Your Password Reset OTP for STM Club");
+            } else {
+                console.log(`👉 DEBUG FORGOT OTP for ${user.mobile_number}: ${otp}`);
+            }
+        } catch (mailErr) {
+            console.log(`👉 DEBUG FORGOT OTP for ${user.mobile_number}: ${otp}`);
+        }
 
         return res.status(200).json({
             status: "true",
@@ -487,44 +676,51 @@ exports.forgotPassword = async (req, res) => {
                 id: user._id.toString(),
                 user_id: user._id.toString(),
                 userId: user._id.toString(),
-                first_name: user.first_name,
-                firstName: user.first_name,
-                mobile_number: user.mobile_number,
-                mobileNumber: user.mobile_number
+                first_name: user.first_name || "",
+                firstName: user.first_name || "",
+                mobile_number: user.mobile_number || "",
+                mobileNumber: user.mobile_number || ""
             }
         });
     } catch (error) {
         return res.status(500).json({
             status: "false",
             success: false,
-            message: error.message
+            message: error.message || "Server error"
         });
     }
 };
+
 /**
- * 8. RESET PASSWORD
+ * RESET PASSWORD
  */
 exports.resetPassword = async (req, res) => {
     try {
-        const otp = String(req.body.otp || "");
-        const password = req.body.password;
+        const otp = String(req.body.otp || "").trim();
+        const password = req.body.password || "";
         const confirmPassword =
             req.body.confirm_password ||
             req.body.confirmPassword ||
-            password;
+            req.body.password_confirmation ||
+            "";
 
-        const userId = req.body.user_id || req.body.userId;
-        const email = (req.body.email || "").toLowerCase().trim();
-        const mobileNumberRaw = req.body.mobile_number || req.body.mobileNumber || "";
-        const mobileNumber = mobileNumberRaw
-            ? mobileNumberRaw.replace(/\D/g, '').slice(-10)
-            : "";
+        const userId = extractUserIdFromBody(req.body);
+        const email = normalizeEmail(req.body.email);
+        const mobile_number = normalizeMobile(extractMobileFromBody(req.body));
 
-        if ((!userId && !email && !mobileNumber) || !otp || !password) {
+        if ((!userId && !email && !mobile_number) || !otp || !password) {
             return res.status(400).json({
                 status: "false",
                 success: false,
                 message: "User id, email, or mobile number along with OTP and password is required."
+            });
+        }
+
+        if (!confirmPassword) {
+            return res.status(400).json({
+                status: "false",
+                success: false,
+                message: "Confirm password is required."
             });
         }
 
@@ -536,18 +732,14 @@ exports.resetPassword = async (req, res) => {
             });
         }
 
-        let query = {
-            otp: otp,
+        const query = {
+            otp,
             otp_expires: { $gt: Date.now() }
         };
 
-        if (userId) {
-            query._id = userId;
-        } else if (email) {
-            query.email = email;
-        } else if (mobileNumber) {
-            query.mobile_number = mobileNumber;
-        }
+        if (userId) query._id = userId;
+        else if (email) query.email = email;
+        else if (mobile_number) query.mobile_number = mobile_number;
 
         const user = await User.findOne(query);
 
@@ -564,49 +756,33 @@ exports.resetPassword = async (req, res) => {
         user.otp_expires = undefined;
         await user.save();
 
-        const token = jwt.sign(
-            { id: user._id, user_type: user.user_type, role: user.role },
-            process.env.JWT_SECRET,
-            { expiresIn: "1d" }
-        );
+        const token = generateAccessToken(user);
 
         return res.status(200).json({
             status: "true",
             success: true,
             message: "Password updated successfully!",
-            data: {
-                id: user._id.toString(),
-                user_id: user._id.toString(),
-                userId: user._id.toString(),
-                first_name: user.first_name || "",
-                firstName: user.first_name || "",
-                last_name: user.last_name || "",
-                email: user.email || "",
-                mobile_number: user.mobile_number || "",
-                mobileNumber: user.mobile_number || "",
-                user_type: String(user.user_type || 3),
-                access_token: token,
-                profile_picture: getFullImageUrl(user.profile_picture) || ""
-            }
+            data: buildAuthUserResponse(user, token)
         });
     } catch (error) {
         return res.status(500).json({
             status: "false",
             success: false,
-            message: error.message
+            message: error.message || "Server error"
         });
     }
 };
 
+/**
+ * LOGOUT
+ */
 exports.logout = async (req, res) => {
     try {
-        const userId = req.body.user_id || req.body.userId || req.body.all_devices || null;
+        const userId = req.body.user_id || req.body.userId || null;
 
-        // Clear cookies for React if they exist
         res.clearCookie("accessToken");
         res.clearCookie("refreshToken");
 
-        // Optional future support if you store refresh tokens / sessions in DB
         if (userId) {
             await User.updateOne(
                 { $or: [{ _id: userId }, { sql_id: userId }] },
@@ -629,12 +805,11 @@ exports.logout = async (req, res) => {
         return res.status(500).json({
             status: "false",
             success: false,
-            message: error.message
+            message: error.message || "Server error"
         });
     }
 };
 
-// --- SYNCED EXPORTS ---
 module.exports = {
     signUp: exports.signUp,
     verifyOtp: exports.verifyOtp,
