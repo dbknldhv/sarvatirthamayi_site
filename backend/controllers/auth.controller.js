@@ -100,6 +100,13 @@ const buildTempSignupResponse = (firstName, mobileNumber) => ({
 const handleDuplicateKeyError = (error, res) => {
     if (error?.code !== 11000) return false;
 
+    console.log("DUPLICATE KEY ERROR:", {
+        code: error.code,
+        keyPattern: error.keyPattern,
+        keyValue: error.keyValue,
+        message: error.message
+    });
+
     if (error.keyPattern?.email) {
         res.status(400).json({
             status: "false",
@@ -118,19 +125,11 @@ const handleDuplicateKeyError = (error, res) => {
         return true;
     }
 
-    if (error.keyPattern?.sql_id) {
-        res.status(400).json({
-            status: "false",
-            success: false,
-            message: "Duplicate sql_id detected. Remove the unique sql_id index."
-        });
-        return true;
-    }
-
     res.status(400).json({
         status: "false",
         success: false,
-        message: "Duplicate record found."
+        message: "Duplicate record found.",
+        debug: error.keyValue || {}
     });
     return true;
 };
