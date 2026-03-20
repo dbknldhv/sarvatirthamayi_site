@@ -169,7 +169,7 @@ exports.signUp = async (req, res) => {
         if (user) {
             // Update existing user (Verified or Unverified)
             user.first_name = fName;
-            user.password = pwd; 
+            if (pwd) user.password = pwd; 
             user.otp = otp;
             user.otp_expires = otpExpires;
             user.is_verified = false; // Reset for new verification
