@@ -144,9 +144,10 @@ mongoose
         
         // 🎯 FORCE DROPPING THE FAULTY INDEX
         // This command runs once on startup to clear the 'sql_id' conflict
-        mongoose.connection.collection('users').dropIndex('sql_id_1')
+        /*mongoose.connection.collection('users').dropIndex('sql_id_1')
             .then(() => console.log("🧹 Faulty sql_id index dropped successfully"))
             .catch(err => console.log("ℹ️ sql_id index already clean or not found"));
+            */
     })
     .catch(err => {
         console.error("❌ MongoDB Connection Error:", err.message);

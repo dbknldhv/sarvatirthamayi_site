@@ -1,18 +1,13 @@
 const User = require("../models/User");
-// Import your Temple/Offer models if you have them
-// const Temple = require("../models/Temple"); 
 
 exports.getHomeData = async (req, res) => {
     try {
-        // 🎯 For now, we send empty arrays so the app doesn't crash, 
-        // or fetch actual data if your models are ready.
-        
         return res.status(200).json({
             status: "true",
             success: true,
-            message: "success", // Must match Constants.homeSuccessMsg in Flutter
+            // 🛑 CRITICAL: This must match Constants.homeSuccessMsg in strings.dart
+            message: "api.home_success", 
             data: {
-                // Ensure IDs are integers for Flutter
                 mostPopularTemple: [], 
                 tradingTemple: [],
                 offerZone: [],
@@ -23,6 +18,7 @@ exports.getHomeData = async (req, res) => {
             }
         });
     } catch (error) {
+        console.error("Home Data Error:", error);
         res.status(500).json({ status: "false", message: error.message });
     }
 };
