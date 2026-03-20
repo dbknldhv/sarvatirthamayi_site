@@ -95,6 +95,7 @@ app.use('/tickets', express.static(path.join(__dirname, 'public/tickets')));
 const adminRoutes = require("./routes/adminRoutes");
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require("./routes/userRoutes");
+const homeRoutes = require("./routes/homeRoutes");
 
 // Health Check
 app.get("/", (req, res) => {
