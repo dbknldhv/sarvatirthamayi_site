@@ -142,36 +142,45 @@ const handleDuplicateKeyError = (error, res) => {
  */
 exports.signUp = async (req, res) => {
     try {
-        const { firstName, email, mobileNumber, password } = extractSignupPayload(req.body);
-        const sanitizedEmail = normalizeEmail(email);
-        
-        // We handle the +91 from Flutter here
-        const sanitizedMobile = normalizeMobile(mobileNumber); 
+        // --- INTERNAL HELPERS (Prevents 500 crashes) ---
+        const body = req.body || {};
+        const fName = body.first_name || body.firstName || body.name || "";
+        const emailAddr = String(body.email || "").toLowerCase().trim();
+        const rawMobile = String(body.mobile_number || body.mobileNo || "");
+        const cleanMobile = rawMobile.replace(/\D/g, "").slice(-10);
+        const pwd = body.password || "";
 
-        // 1. Find the user in MongoDB
+        // --- 1. VALIDATION ---
+        if (!fName || !emailAddr || !cleanMobile || !pwd) {
+            return res.status(400).json({ 
+                status: "false", 
+                message: "Missing Name, Email, Mobile, or Password" 
+            });
+        }
+
+        // --- 2. DATABASE SEARCH ---
         let user = await User.findOne({ 
-            $or: [{ email: sanitizedEmail }, { mobile_number: sanitizedMobile }] 
+            $or: [{ email: emailAddr }, { mobile_number: cleanMobile }] 
         });
 
-        const otp = generateOtp();
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
         if (user) {
-            // 🎯 THE FIX: If user exists, update them and reset verification.
-            // This prevents the "User already exists" error you were seeing.
-            user.first_name = firstName;
-            user.password = password; 
+            // Update existing user (Verified or Unverified)
+            user.first_name = fName;
+            user.password = pwd; 
             user.otp = otp;
             user.otp_expires = otpExpires;
-            user.is_verified = false; 
+            user.is_verified = false; // Reset for new verification
             await user.save();
         } else {
-            // Create new user
+            // Create new record
             user = await User.create({
-                first_name: firstName,
-                email: sanitizedEmail,
-                mobile_number: sanitizedMobile,
-                password: password,
+                first_name: fName,
+                email: emailAddr,
+                mobile_number: cleanMobile,
+                password: pwd,
                 otp: otp,
                 otp_expires: otpExpires,
                 is_verified: false,
@@ -179,37 +188,40 @@ exports.signUp = async (req, res) => {
             });
         }
 
-        // Send OTP
+        // --- 3. SEND OTP (Wrapped to prevent 500 if SMTP fails) ---
         try {
-            await sendOtpEmail(sanitizedEmail, otp);
+            await transporter.sendMail({
+                from: process.env.MAIL_FROM,
+                to: emailAddr,
+                subject: "Your OTP Code",
+                text: `Your OTP is ${otp}`
+            });
         } catch (mailErr) {
-            console.log("OTP for debug:", otp);
+            console.log("Mail failed, use this OTP for testing:", otp);
         }
 
-        // --- 🎯 MIRROR RESPONSE FOR YOUR signup_screen.dart ---
+        // --- 4. FLUTTER-READY RESPONSE ---
         return res.status(200).json({
             status: "true",
             success: true,
             message: "OTP sent successfully",
             data: { 
-                // Matches: state.signupModel?.data?.id
                 id: user._id.toString(),
                 userId: user._id.toString(),
-                
-                // Matches: state.signupModel?.data?.mobileNumber
                 mobileNumber: user.mobile_number, 
-                mobile_number: user.mobile_number,
-                
-                first_name: user.first_name
+                mobile_number: user.mobile_number
             }
         });
 
     } catch (error) {
-        console.error("Signup Error:", error);
-        res.status(500).json({ status: "false", message: "Server error. Please try again." });
+        // This will print the exact line causing the 500 error in your Hostinger console
+        console.error("CRITICAL SIGNUP ERROR:", error);
+        return res.status(500).json({ 
+            status: "false", 
+            message: "Internal Server Error: " + error.message 
+        });
     }
-};
-/**
+};/**
  * VERIFY OTP
  * Creates final user after OTP validation
  */
