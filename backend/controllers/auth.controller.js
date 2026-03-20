@@ -228,7 +228,12 @@ exports.signUp = async (req, res) => {
 exports.verifyOtp = async (req, res) => {
     try {
         // Handle different possible key names from Flutter
-        const mobileNumber = normalizeMobile(req.body.mobile_number || req.body.mobileNumber || req.body.mobile_no || req.body.mobileNo);
+        const mobileNumber = normalizeMobile(
+            req.body.mobile_number || 
+            req.body.mobileNumber ||
+             req.body.mobile_no || 
+             req.body.mobileNo
+            );
         const otp = String(req.body.otp || "").trim();
 
         // Find user in MongoDB
@@ -264,10 +269,19 @@ exports.verifyOtp = async (req, res) => {
                 userId: user._id.toString(),
                 user_id: user._id.toString(),
                 access_token: token,
-                mobile_number: user.mobile_number
+                accessToken: token,
+                // 🎯 THE FIX: Return as Integer to match Flutter 'int?'
+                user_type: Number(user.user_type || 3), 
+                userType: Number(user.user_type || 3),
+
+                mobile_number: user.mobile_number,
+                mobileNumber: user.mobile_number,
+                first_name: user.first_name || "",
+                firstName: user.first_name || ""
             }
         });
     } catch (error) {
+        console.error("Verify OTP Error:", error);
         res.status(500).json({ status: "false", message: error.message });
     }
 };
