@@ -265,19 +265,36 @@ exports.verifyOtp = async (req, res) => {
             message: "Account verified successfully!", // Contains "verified" for Flutter check
             token: token,
             data: {
-                id: user._id.toString(),
-                userId: user._id.toString(),
-                user_id: user._id.toString(),
+                // REQUIRED: userId must be an int? to match your RegisterVerifyOtpModel
+                // We use sql_id (int) or a numeric hash of the MongoDB ID
+                user_id: user.sql_id || parseInt(user._id.toString().substring(0, 8), 16),
+                userId: user.sql_id || parseInt(user._id.toString().substring(0, 8), 16),
+                
+                // REQUIRED: user_type must be a String? to match your model
+                user_type: String(user.user_type || "3"),
+                userType: String(user.user_type || "3"),
+
+                // Auth Tokens
                 access_token: token,
                 accessToken: token,
-                // 🎯 THE FIX: Return as Integer to match Flutter 'int?'
-                user_type: Number(user.user_type || 3), 
-                userType: Number(user.user_type || 3),
 
-                mobile_number: user.mobile_number,
-                mobileNumber: user.mobile_number,
+                // Basic Info
                 first_name: user.first_name || "",
-                firstName: user.first_name || ""
+                firstName: user.first_name || "",
+                last_name: user.last_name || "",
+                lastName: user.last_name || "",
+                email: user.email || "",
+                
+                // Profile & Meta (Matches model fields)
+                profile_picture: user.profile_picture || "",
+                profilePicture: user.profile_picture || "",
+                date_of_birth: null,
+                gender: "1",
+                
+                // Legacy support for your Bloc
+                id: user._id.toString(),
+                mobile_number: user.mobile_number,
+                mobileNumber: user.mobile_number
             }
         });
     } catch (error) {
