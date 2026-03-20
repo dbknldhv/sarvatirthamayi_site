@@ -56,6 +56,7 @@ app.use(compression());
 // --- FIX: ROBUST CORS WHITELIST ---
 const allowedOrigins = [
     "http://localhost:5173", 
+    "http://localhost:3000",
     "http://127.0.0.1:5173",
     "https://api.sarvatirthamayi.com",
     "https://sarvatirthamayi.com",        // 🎯 EXACT match for your site
@@ -131,16 +132,24 @@ app.use((err, req, res, next) => {
 });
 
 // --- 9. DATABASE CONNECTION ---
+// --- 9. DATABASE CONNECTION ---
 mongoose
-    .connect(process.env.MONGO_URI)
+    .connect(process.env.MONGO_URI, {
+        autoIndex: true, // Keep this true to build new indexes
+    })
     .then(() => {
         console.log(`✅ MongoDB Connected Successfully`);
+        
+        // 🎯 FORCE DROPPING THE FAULTY INDEX
+        // This command runs once on startup to clear the 'sql_id' conflict
+        mongoose.connection.collection('users').dropIndex('sql_id_1')
+            .then(() => console.log("🧹 Faulty sql_id index dropped successfully"))
+            .catch(err => console.log("ℹ️ sql_id index already clean or not found"));
     })
     .catch(err => {
         console.error("❌ MongoDB Connection Error:", err.message);
         if (isProduction) process.exit(1); 
     });
-
 // --- 10. SERVER START ---
 const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, () => {
