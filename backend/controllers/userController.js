@@ -95,9 +95,13 @@ exports.loginUser = async (req, res) => {
 /**
  * 4. GET PROFILE (Universal for Admin 1, Temple Admin 2, User 3)
  */
+/**
+ * 4. GET PROFILE - Final Universal Version
+ * Matches Flutter Constants, BLoC Logic, and React Admin Needs
+ */
 exports.getProfile = async (req, res) => {
     try {
-        // req.user.id is set by your auth middleware from the JWT token
+        // Fetch user based on ID from Auth Middleware
         const user = await User.findById(req.user.id).select("-password");
 
         if (!user) {
@@ -108,44 +112,50 @@ exports.getProfile = async (req, res) => {
             });
         }
 
-        // --- 🎯 THE FIX: Wrap in 'data' and cast 'user_type' to String ---
+        // --- 🎯 THE "FLUTTER CONTRACT" SYNC ---
         return res.status(200).json({
-            status: "true",      // Flutter needs this String
-            success: true,       // React needs this Boolean
-            message: "Profile fetched successfully",
+            status: "true",  // ✅ Required as String for Flutter
+            success: true,   // ✅ Required as Boolean for React/Web
+            // 🛑 CRITICAL: This MUST match Constants.profileSuccessMsg in strings.dart exactly
+            message: "Profile retrieved successfully.", 
             data: {
-                // 1. ID Fix: Convert MongoDB String ID to an Integer for Flutter
+                // 1. ID MIRRORING (Fixes "String is not a subtype of int")
                 user_id: user.sql_id || parseInt(user._id.toString().substring(0, 8), 16),
                 userId: user.sql_id || parseInt(user._id.toString().substring(0, 8), 16),
-                
-                // 2. Dynamic Role: Support 1, 2, or 3 as a String
+                id: user._id.toString(), // For MongoDB standard use
+
+                // 2. TYPE MIRRORING (Fixes "int is not a subtype of String")
                 user_type: String(user.user_type || "3"),
                 userType: String(user.user_type || "3"),
 
-                // 3. User Details (Mirroring keys for safety)
+                // 3. PERSONAL DETAILS (Matches my_profile_screen.dart containers)
                 first_name: user.first_name || "",
                 firstName: user.first_name || "",
                 last_name: user.last_name || "",
                 lastName: user.last_name || "",
-                name: user.name || user.first_name || "",
+                name: user.name || `${user.first_name} ${user.last_name || ''}`.trim(),
                 email: user.email || "",
                 mobile_number: user.mobile_number || "",
                 mobileNumber: user.mobile_number || "",
                 
-                // 4. Media & Roles
+                // 4. MEDIA & META
                 profile_picture: user.profile_picture || "",
                 profilePicture: user.profile_picture || "",
-                role: user.role || (user.user_type === 1 ? "admin" : user.user_type === 2 ? "temple_admin" : "user"),
+                date_of_birth: user.date_of_birth || "",
+                dateOfBirth: user.date_of_birth || "",
+                gender: String(user.gender || "1"),
                 
-                // MongoDB standard ID for React/Web
-                id: user._id.toString()
+                // Dynamic Role Assignment
+                role: user.role || (user.user_type === 1 ? "admin" : user.user_type === 2 ? "temple_admin" : "user"),
+                is_verified: user.is_verified || false
             }
         });
     } catch (error) {
-        console.error("Profile Error:", error);
+        console.error("🔥 Profile API Error:", error);
         res.status(500).json({ status: "false", success: false, message: error.message });
     }
 };
+
 /**
  * 5. ADMIN MANAGEMENT
  */
