@@ -142,258 +142,147 @@ const handleDuplicateKeyError = (error, res) => {
  */
 exports.signUp = async (req, res) => {
     try {
-        const {
-            firstName,
-            lastName,
-            email,
-            mobileNumber,
-            password,
-            confirmPassword
-        } = extractSignupPayload(req.body);
-
+        const { firstName, lastName, email, mobileNumber, password } = extractSignupPayload(req.body);
         const sanitizedEmail = normalizeEmail(email);
         const sanitizedMobile = normalizeMobile(mobileNumber);
 
-        if (!firstName || !sanitizedEmail || !sanitizedMobile || !password) {
-            return res.status(400).json({
-                status: "false",
-                success: false,
-                message: "First name, email, mobile number, and password are required."
-            });
-        }
-
-        if (!confirmPassword) {
-            return res.status(400).json({
-                status: "false",
-                success: false,
-                message: "Confirm password is required."
-            });
-        }
-
-        if (password !== confirmPassword) {
-            return res.status(400).json({
-                status: "false",
-                success: false,
-                message: "Password and confirm password do not match."
-            });
-        }
-
-        if (!/^\S+@\S+\.\S+$/.test(sanitizedEmail)) {
-            return res.status(400).json({
-                status: "false",
-                success: false,
-                message: "Enter a valid email address."
-            });
-        }
-
-        if (!/^\d{10}$/.test(sanitizedMobile)) {
-            return res.status(400).json({
-                status: "false",
-                success: false,
-                message: "Enter a valid mobile number."
-            });
-        }
-
-        const existingUser = await User.findOne({
-            $or: [
-                { email: sanitizedEmail },
-                { mobile_number: sanitizedMobile }
-            ]
+        // 1. Database Check (Allows re-signup if unverified)
+        let user = await User.findOne({ 
+            $or: [{ email: sanitizedEmail }, { mobile_number: sanitizedMobile }] 
         });
 
-        if (existingUser) {
-            if (existingUser.email === sanitizedEmail) {
-                return res.status(400).json({
-                    status: "false",
-                    success: false,
-                    message: "Email already registered."
-                });
-            }
-
-            if (existingUser.mobile_number === sanitizedMobile) {
-                return res.status(400).json({
-                    status: "false",
-                    success: false,
-                    message: "Mobile number already registered."
-                });
-            }
+        if (user && user.is_verified) {
+            return res.status(400).json({ status: "false", message: "User already exists. Please login." });
         }
 
         const otp = generateOtp();
+        const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
-        otpStore.set(sanitizedMobile, {
-            firstName,
-            lastName,
-            email: sanitizedEmail,
-            password,
-            otp,
-            expires: Date.now() + 10 * 60 * 1000
-        });
+        if (user) {
+            user.otp = otp;
+            user.otp_expires = otpExpires;
+            await user.save();
+        } else {
+            user = await User.create({
+                first_name: firstName,
+                last_name: lastName || "",
+                email: sanitizedEmail,
+                mobile_number: sanitizedMobile,
+                password: password,
+                otp: otp,
+                otp_expires: otpExpires,
+                is_verified: false,
+                user_type: 3
+            });
+        }
 
         try {
             await sendOtpEmail(sanitizedEmail, otp);
         } catch (mailErr) {
-            console.log(`👉 DEBUG SIGNUP OTP for ${sanitizedMobile}: ${otp}`);
+            console.log("OTP for debug:", otp);
         }
 
+        // --- 🎯 THE FLUTTER-FIX RESPONSE ---
+        // We provide 'id', 'userId', and 'user_id' so your 
+        // existing Flutter model never fails to find the key.
         return res.status(200).json({
             status: "true",
             success: true,
-            message: "OTP sent successfully",
-            data: buildTempSignupResponse(firstName, sanitizedMobile)
+            message: "OTP generated successfully. Check your email.",
+            data: { 
+                id: user._id.toString(),      // 👈 Flutter: response.data?.id
+                userId: user._id.toString(),  // 👈 Flutter: response.data?.userId
+                user_id: user._id.toString(), // 👈 Flutter: response.data?.user_id
+                first_name: user.first_name,
+                email: sanitizedEmail,
+                mobile_number: sanitizedMobile
+            }
         });
     } catch (error) {
-        return res.status(500).json({
-            status: "false",
-            success: false,
-            message: error.message || "Server error"
-        });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
-
 /**
  * VERIFY OTP
  * Creates final user after OTP validation
  */
 exports.verifyOtp = async (req, res) => {
     try {
-        const mobileNumber = normalizeMobile(extractMobileFromBody(req.body));
+        // Handle different possible key names from Flutter
+        const mobileNumber = normalizeMobile(req.body.mobile_number || req.body.mobileNumber || req.body.mobile_no || req.body.mobileNo);
         const otp = String(req.body.otp || "").trim();
 
-        if (!mobileNumber || !otp) {
-            return res.status(400).json({
-                status: "false",
-                success: false,
-                message: "Mobile number and OTP are required."
-            });
-        }
-
-        const pendingSignup = otpStore.get(mobileNumber);
-
-        if (!pendingSignup || pendingSignup.otp !== otp || pendingSignup.expires <= Date.now()) {
-            return res.status(400).json({
-                status: "false",
-                success: false,
-                message: "Invalid or expired OTP"
-            });
-        }
-
-        const existingUser = await User.findOne({
-            $or: [
-                { email: pendingSignup.email },
-                { mobile_number: mobileNumber }
-            ]
+        // Find user in MongoDB
+        const user = await User.findOne({
+            mobile_number: mobileNumber,
+            otp: otp,
+            otp_expires: { $gt: Date.now() }
         });
 
-        if (existingUser) {
-            otpStore.delete(mobileNumber);
-
-            if (existingUser.email === pendingSignup.email) {
-                return res.status(400).json({
-                    status: "false",
-                    success: false,
-                    message: "Email already registered."
-                });
-            }
-
-            if (existingUser.mobile_number === mobileNumber) {
-                return res.status(400).json({
-                    status: "false",
-                    success: false,
-                    message: "Mobile number already registered."
-                });
-            }
-        }
-
-        let user;
-        try {
-            user = await User.create({
-                first_name: pendingSignup.firstName,
-                last_name: pendingSignup.lastName,
-                name: `${pendingSignup.firstName} ${pendingSignup.lastName || ""}`.trim(),
-                email: pendingSignup.email,
-                mobile_number: mobileNumber,
-                password: pendingSignup.password,
-                user_type: 3,
-                is_verified: true
+        if (!user) {
+            return res.status(400).json({
+                status: "false", // Keeps Flutter in isNavigate: false
+                success: false,
+                message: "Invalid or expired OTP."
             });
-        } catch (error) {
-            if (handleDuplicateKeyError(error, res)) return;
-            throw error;
         }
 
-        otpStore.delete(mobileNumber);
+        user.is_verified = true;
+        user.otp = undefined;
+        user.otp_expires = undefined;
+        await user.save();
 
         const token = generateAccessToken(user);
 
-        return res.status(201).json({
-            status: "true",
+        // --- 🎯 MIRROR RESPONSE FOR FLUTTER ---
+        return res.status(200).json({
+            status: "true", // Matches Flutter's isSuccess check
             success: true,
-            message: "Account created successfully!",
-            data: buildAuthUserResponse(user, token)
+            message: "Account verified successfully!", // Contains "verified" for Flutter check
+            token: token,
+            data: {
+                id: user._id.toString(),
+                userId: user._id.toString(),
+                user_id: user._id.toString(),
+                access_token: token,
+                mobile_number: user.mobile_number
+            }
         });
     } catch (error) {
-        return res.status(500).json({
-            status: "false",
-            success: false,
-            message: error.message || "Server error"
-        });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
-
 /**
  * RESEND OTP
  */
 exports.resendOtp = async (req, res) => {
     try {
-        const mobileNumber = normalizeMobile(extractMobileFromBody(req.body));
+        const mobileNumber = normalizeMobile(req.body.mobile_number || req.body.mobileNo);
 
-        if (!mobileNumber) {
-            return res.status(400).json({
-                status: "false",
-                success: false,
-                message: "Mobile number is required."
-            });
-        }
+        const user = await User.findOne({ mobile_number: mobileNumber });
 
-        const pendingSignup = otpStore.get(mobileNumber);
-
-        if (!pendingSignup) {
-            return res.status(404).json({
-                status: "false",
-                success: false,
-                message: "User not found or signup session expired."
-            });
+        if (!user) {
+            return res.status(404).json({ status: "false", message: "User not found" });
         }
 
         const otp = generateOtp();
-
-        otpStore.set(mobileNumber, {
-            ...pendingSignup,
-            otp,
-            expires: Date.now() + 10 * 60 * 1000
-        });
+        user.otp = otp;
+        user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
+        await user.save();
 
         try {
-            await sendOtpEmail(pendingSignup.email, otp);
-        } catch (mailErr) {
-            console.log(`👉 DEBUG RESEND OTP for ${mobileNumber}: ${otp}`);
-        }
+            await sendOtpEmail(user.email, otp);
+        } catch (err) { console.log("OTP:", otp); }
 
         return res.status(200).json({
             status: "true",
             success: true,
-            message: "OTP resent successfully"
+            message: "OTP resent successfully" // Matches Flutter's expectation
         });
     } catch (error) {
-        return res.status(500).json({
-            status: "false",
-            success: false,
-            message: error.message || "Server error"
-        });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
-
 /**
  * FORGOT VERIFY OTP
  */
@@ -406,13 +295,14 @@ exports.forgotVerifyOtp = async (req, res) => {
             return res.status(400).json({
                 status: "false",
                 success: false,
-                message: "User id and OTP are required."
+                message: "User ID and OTP are required."
             });
         }
 
+        // 1. Check database for valid OTP and Expiry
         const user = await User.findOne({
             _id: userId,
-            otp,
+            otp: otp,
             otp_expires: { $gt: Date.now() }
         });
 
@@ -424,16 +314,21 @@ exports.forgotVerifyOtp = async (req, res) => {
             });
         }
 
+        // 2. IMPORTANT: Generate a temporary token 
+        // This lets Flutter call ResetPassword securely.
+        const tempToken = generateAccessToken(user);
+
         return res.status(200).json({
             status: "true",
             success: true,
             message: "OTP verified successfully",
+            token: tempToken, // 🎯 Return token at root level
             data: {
                 id: user._id.toString(),
                 user_id: user._id.toString(),
                 userId: user._id.toString(),
                 first_name: user.first_name || "",
-                firstName: user.first_name || ""
+                accessToken: tempToken // 🎯 Also inside data for Flutter model safety
             }
         });
     } catch (error) {
@@ -444,7 +339,6 @@ exports.forgotVerifyOtp = async (req, res) => {
         });
     }
 };
-
 /**
  * ADMIN SIGNUP
  */
@@ -515,73 +409,65 @@ exports.adminSignup = async (req, res) => {
  */
 exports.login = async (req, res) => {
     try {
-        const email = normalizeEmail(req.body.email);
-        const rawMobile = extractMobileFromBody(req.body);
-        const mobile_number = normalizeMobile(rawMobile);
+        const mobile = normalizeMobile(req.body.mobile || req.body.mobile_number || req.body.mobileNo);
         const password = req.body.password || "";
 
-        if ((!email && !mobile_number) || !password) {
-            return res.status(400).json({
-                status: "false",
-                success: false,
-                message: "Email or mobile number and password are required."
-            });
-        }
-
-        let user = null;
-
-        if (email) {
-            user = await User.findOne({ email });
-        } else if (mobile_number) {
-            user = await User.findOne({ mobile_number });
-        }
+        // 1. Find user in MongoDB
+        const user = await User.findOne({ mobile_number: mobile });
 
         if (!user) {
-            return res.status(401).json({
-                status: "false",
-                success: false,
-                message: "Invalid credentials."
+            return res.status(401).json({ 
+                status: "false", 
+                message: "User not found. Please sign up." 
             });
         }
 
-        const isMatch = await user.matchPassword(password);
+        // 2. Check Verification Status
+        if (!user.is_verified) {
+            return res.status(401).json({ 
+                status: "false", 
+                message: "Account unverified. Please verify your OTP." 
+            });
+        }
 
+        // 3. Validate Password
+        const isMatch = await user.matchPassword(password);
         if (!isMatch) {
-            return res.status(401).json({
-                status: "false",
-                success: false,
-                message: "Invalid credentials."
+            return res.status(401).json({ 
+                status: "false", 
+                message: "Invalid password." 
             });
         }
 
         const token = generateAccessToken(user);
-        const redirectPaths = { 1: "/admin/dashboard", 2: "/temple-admin/dashboard", 3: "/" };
 
+        // --- 🎯 THE "NO-DISTURB" FLUTTER RESPONSE ---
         return res.status(200).json({
             status: "true",
             success: true,
             message: "Login Successful",
-            token,
-            redirectPath: redirectPaths[user.user_type] || "/",
-            data: buildAuthUserResponse(user, token),
-            user: {
-                id: user._id,
-                email: user.email,
-                name: user.first_name || "",
-                user_type: user.user_type,
-                role: user.role
+            data: {
+                // We provide every variation so your Model never fails
+                userId: user._id.toString(),
+                user_id: user._id.toString(),
+                id: user._id.toString(),
+                
+                // Matches your: response.data?.accessToken
+                accessToken: token, 
+                access_token: token,
+                
+                // Matches your: response.data?.userType
+                userType: String(user.user_type || "3"),
+                user_type: String(user.user_type || "3"),
+                
+                first_name: user.first_name,
+                email: user.email
             }
         });
     } catch (error) {
-        console.error("Login Error:", error);
-        return res.status(500).json({
-            status: "false",
-            success: false,
-            message: "Server error"
-        });
+        res.status(500).json({ status: "false", message: "Server error during login" });
     }
 };
-
 /**
  * REFRESH ACCESS TOKEN
  */
@@ -777,28 +663,38 @@ exports.resetPassword = async (req, res) => {
  */
 exports.logout = async (req, res) => {
     try {
-        const userId = req.body.user_id || req.body.userId || null;
+        // 1. Extract ID from all possible keys sent by Flutter/React
+        const userId = req.body.user_id || req.body.userId || req.body.id || null;
 
+        // 2. Clear cookies (useful for the React Web Admin)
         res.clearCookie("accessToken");
         res.clearCookie("refreshToken");
 
+        // 3. Update Database (Unset tokens for security)
         if (userId) {
-            await User.updateOne(
-                { $or: [{ _id: userId }, { sql_id: userId }] },
-                {
-                    $unset: {
-                        refreshToken: 1,
-                        deviceToken: 1
+            // We use try/catch inside to prevent a DB error from blocking the logout response
+            try {
+                await User.updateOne(
+                    { _id: userId }, 
+                    {
+                        $unset: {
+                            refreshToken: 1,
+                            deviceToken: 1 // Clears push notification token on logout
+                        }
                     }
-                }
-            ).catch(() => {});
+                );
+            } catch (dbErr) {
+                console.log("DB Logout cleanup skipped:", dbErr.message);
+            }
         }
 
+        // --- 🎯 MIRROR RESPONSE FOR FLUTTER ---
+        // Matches Flutter's: if (response.status == "true")
         return res.status(200).json({
             status: "true",
             success: true,
             message: "Logged out successfully",
-            data: []
+            data: [] // Matches your LogoutModel's data expectation
         });
     } catch (error) {
         return res.status(500).json({
