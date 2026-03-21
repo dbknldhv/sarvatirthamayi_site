@@ -268,52 +268,42 @@ exports.getProfile = async (req, res) => {
     }
 };
 
-
 exports.updateProfile = async (req, res) => {
     try {
         const userId = req.user.id;
+        // Fields from Flutter's UpdateProfileResponseEvent
         const { first_name, last_name, email, mobile_number, date_of_birth, gender } = req.body;
 
-        // 1. Prepare the update object
         let updateData = {
             first_name,
             last_name,
             email,
             mobile_number,
             date_of_birth,
-            gender: gender ? String(gender) : "1", // Flutter sends gender as 1, 2, or 3
+            gender: gender ? String(gender) : "1",
             name: `${first_name} ${last_name}`.trim()
         };
 
-        // 2. Handle File Upload (Profile Picture)
-        // If your middleware uses upload.fields([{ name: 'profile_picture' }])
+        // 🎯 Handle the file from your middleware
         if (req.files && req.files['profile_picture']) {
+            // Stores path like: uploads/profile_picture-17110...jpg
             updateData.profile_picture = req.files['profile_picture'][0].path;
-        } 
-        // If your middleware uses upload.single('profile_picture')
-        else if (req.file) {
-            updateData.profile_picture = req.file.path;
         }
 
-        // 3. Update User in MongoDB
         const updatedUser = await User.findByIdAndUpdate(
             userId,
             { $set: updateData },
-            { new: true, runValidators: true }
+            { new: true }
         ).lean();
 
-        if (!updatedUser) {
-            return res.status(404).json({ status: "false", message: "User not found" });
-        }
-
-        // 4. Format for UpdateProfileModel in Flutter
+        // 🎯 Format for Flutter's Data.fromJson (UpdateProfileModel)
         const formattedData = {
             user_id: updatedUser.sql_id || 0,
             first_name: updatedUser.first_name || "",
             last_name: updatedUser.last_name || "",
             email: updatedUser.email || "",
             mobile_number: String(updatedUser.mobile_number || ""),
-            date_of_birth: updatedUser.date_of_birth || "",
+            date_of_birth: updatedUser.date_of_birth || "", // Flutter expects String?
             gender: String(updatedUser.gender || "1"),
             user_type: String(updatedUser.user_type || "3"),
             profile_picture: updatedUser.profile_picture || "",
@@ -323,18 +313,12 @@ exports.updateProfile = async (req, res) => {
         res.status(200).json({
             status: "true",
             success: true,
-            // 🎯 Match Constants.profileUpdateSuccessMsg
-            message: "Profile updated successfully.", 
+            message: "Profile updated successfully.", // Matches Constants.profileUpdateSuccessMsg
             data: formattedData
         });
 
     } catch (error) {
-        console.error("Update Profile Error:", error);
-        res.status(500).json({ 
-            status: "false", 
-            success: false, 
-            message: error.message 
-        });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
 
