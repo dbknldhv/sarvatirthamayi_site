@@ -180,3 +180,32 @@ exports.getActiveMemberships = async (req, res) => {
         res.status(500).json({ status: "false", success: false, message: error.message });
     }
 };
+
+/**
+ * 4. Fetch My Membership Card details (SAM's ACTIVE CARD)
+ * Required by userRoutes.js line 70
+ */
+exports.getMyMembershipCard = async (req, res) => {
+    try {
+        const card = await PurchasedMemberCard.findOne({ 
+            user_id: req.user.id, 
+            payment_status: 2 // 2: Paid
+        }).sort({ created_at: -1 }).populate('membership_card_id');
+
+        if (!card) {
+            return res.status(404).json({ 
+                status: "false", 
+                success: false, 
+                message: "No active membership found" 
+            });
+        }
+
+        res.status(200).json({ 
+            status: "true",
+            success: true, 
+            data: card 
+        });
+    } catch (error) {
+        res.status(500).json({ status: "false", success: false, message: error.message });
+    }
+};
