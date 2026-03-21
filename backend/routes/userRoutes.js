@@ -64,6 +64,10 @@ router.put('/update-profile', protect, upload.fields([
     { name: 'bannerImage', maxCount: 1 }
 ]), userController.updateProfile);
 
+router.put('/profile', protect, upload.fields([
+    { name: 'profile_picture', maxCount: 1 }
+]), userController.updateProfile);
+
 // Voucher Management
 router.get("/vouchers/available", protect, userVoucherController.getAvailableVouchers);
 router.post("/vouchers/verify", protect, userVoucherController.verifyVoucherForUser);
