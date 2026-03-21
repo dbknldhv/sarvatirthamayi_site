@@ -93,13 +93,23 @@ exports.getPublicTemples = async (req, res) => {
  * 3. Get Temple By ID (Detail View)
  * FIX: Matches TempleShowDetailModel.dart with nested Address
  */
+// backend/controllers/user/join-nowController.js
+
 exports.getPublicTempleById = async (req, res) => {
     try {
-        const { id } = req.params;
-        
-        // Find by SQL ID if the app sends sql_id, or findById if it sends Mongo _id
-        // Usually, the app sends Mongo _id in the URL
-        const temple = await Temple.findById(id);
+        // Look for ID in URL params OR in the request body (temple_id)
+        const id = req.params.id || req.body.temple_id;
+
+        if (!id) {
+            return res.status(400).json({
+                status: "false",
+                message: "Temple ID is required"
+            });
+        }
+
+        // Search by sql_id if it's a number, or by _id if it's a string
+        const query = isNaN(id) ? { _id: id } : { sql_id: parseInt(id) };
+        const temple = await Temple.findOne(query);
 
         if (!temple) {
             return res.status(404).json({
@@ -109,13 +119,14 @@ exports.getPublicTempleById = async (req, res) => {
             });
         }
 
+        // Same formatting as before to match TempleShowDetailModel.dart
         const formattedData = {
             id: parseInt(temple.sql_id) || 0,
             name: temple.name || "",
             short_description: temple.short_description || "",
             long_description: temple.long_description || temple.description || "",
             mobile_number: temple.mobile_number || "",
-            visit_price: String(temple.visit_price || "0"), // Must be String for Show Model
+            visit_price: String(temple.visit_price || "0"),
             address: {
                 full_address: temple.full_address || `${temple.city_name}, ${temple.state_name}`,
                 address_line1: temple.address_line1 || "",
@@ -146,13 +157,10 @@ exports.getPublicTempleById = async (req, res) => {
     } catch (error) {
         res.status(500).json({
             status: "false",
-            success: false,
-            message: "Error fetching temple details",
-            error: error.message
+            message: error.message
         });
     }
 };
-
 /**
  * 4. Get Active Membership Plans
  */

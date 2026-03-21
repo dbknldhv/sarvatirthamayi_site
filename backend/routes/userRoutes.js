@@ -30,6 +30,7 @@ router.get("/temples/:id", joinNowController.getPublicTempleById);
 router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple);
 router.get("/membership-plans", joinNowController.getActiveMembershipPlans);
 
+
 // Ritual Metadata
 router.get("/rituals", ritualController.getAllRituals); 
 router.get("/rituals/types", ritualController.getRitualTypes);
@@ -43,6 +44,7 @@ router.post("/resend-otp", userController.resendOtp);
 router.post("/login", userController.loginUser);
 router.post('/forgot-password', userController.forgotPassword);
 router.post('/reset-password', userController.resetPassword);
+
 
 // --- 6. Protected Routes (Require Token) ---
 
@@ -82,6 +84,8 @@ router.post('/card/verify-payment', protect, cardController.verifyAndActivateMem
 router.post('/book-temple/create-order', protect, templeBookingController.createTempleBookingOrder);
 router.post('/book-temple/verify', protect, templeBookingController.verifyAndConfirmBooking);
 router.get('/my-temple-bookings', protect, templeBookingController.getMyBookings);
+router.get("/temples/:id", joinNowController.getPublicTempleById);
+router.post("/temple/show", joinNowController.getPublicTempleById);
 
 // Ritual Booking Flow
 router.post('/rituals/create-order', protect, ritualController.createRitualOrder);
