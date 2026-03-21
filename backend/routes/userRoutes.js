@@ -58,7 +58,7 @@ router.get('/profile', protect, userController.getProfile);
  * will be undefined, causing a 500 error.
  */
 router.put('/update-profile', protect, upload.fields([
-    { name: 'profileImage', maxCount: 1 },
+    { name: 'profile_picture', maxCount: 1 },
     { name: 'bannerImage', maxCount: 1 }
 ]), userController.updateProfile);
 

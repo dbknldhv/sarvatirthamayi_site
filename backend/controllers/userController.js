@@ -103,7 +103,8 @@ exports.getProfile = async (req, res) => {
     try {
         // Fetch user based on ID from Auth Middleware
         const user = await User.findById(req.user.id).select("-password");
-
+        //if (!user) return res.status(404).json({ status: "false", message: "User not found" });
+        
         if (!user) {
             return res.status(404).json({ 
                 status: "false", 
@@ -118,6 +119,7 @@ exports.getProfile = async (req, res) => {
             success: true,   // ✅ Required as Boolean for React/Web
             // 🛑 CRITICAL: This MUST match Constants.profileSuccessMsg in strings.dart exactly
             message: "Profile retrieved successfully.", 
+
             data: {
                 // 1. ID MIRRORING (Fixes "String is not a subtype of int")
                 user_id: user.sql_id || parseInt(user._id.toString().substring(0, 8), 16),
@@ -153,6 +155,62 @@ exports.getProfile = async (req, res) => {
     } catch (error) {
         console.error("🔥 Profile API Error:", error);
         res.status(500).json({ status: "false", success: false, message: error.message });
+    }
+};
+/**
+ * 4.5 UPDATE PROFILE (For Logged-in User)
+ * This handles the request from Flutter's ProfileBloc
+ */
+exports.updateProfile = async (req, res) => {
+    try {
+        const userId = req.user.id; // From Protect Middleware
+        const { first_name, last_name, email, mobile_number, date_of_birth, gender } = req.body;
+
+        const updateData = {
+            first_name,
+            last_name,
+            email,
+            mobile_number,
+            date_of_birth,
+            gender: String(gender || "1"),
+            name: `${first_name} ${last_name || ''}`.trim()
+        };
+
+        // If a file was uploaded via Multer
+        if (req.file && req.files.profile_picture) {
+            updateData.profile_picture = req.file.profile_picture.path;
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            { $set: updateData },
+            { new: true, runValidators: true }
+        ).select("-password");
+
+        if (!updatedUser) {
+            return res.status(404).json({ status: "false", message: "User not found" });
+        }
+
+        return res.status(200).json({
+            status: "true",
+            success: true,
+            // 🛑 CRITICAL: This MUST match Constants.profileUpdateSuccessMsg in Flutter
+            message: "Profile updated successfully.", 
+            data: {
+                user_id: updatedUser.sql_id || parseInt(updatedUser._id.toString().substring(0, 8), 16),
+                first_name: updatedUser.first_name || "",
+                last_name: updatedUser.last_name || "",
+                email: updatedUser.email || "",
+                mobile_number: updatedUser.mobile_number || "",
+                date_of_birth: updatedUser.date_of_birth || "",
+                gender: String(updatedUser.gender || "1"),
+                profile_picture: updatedUser.profile_picture || "",
+                user_type: String(updatedUser.user_type || "3")
+            }
+        });
+    } catch (error) {
+        console.error("🔥 Update Error:", error);
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
 
@@ -196,6 +254,7 @@ module.exports = {
     loginUser: exports.loginUser,
     login: exports.loginUser,       // Alias
     getProfile: exports.getProfile, // 🎯 Standard
+    updateProfile: exports.updateProfile,
     checkAuth: exports.getProfile,  // 🎯 Common Line 8 Alias
     getMe: exports.getProfile,      // 🎯 Common Line 8 Alias
     getAllUsers: exports.getAllUsers,
