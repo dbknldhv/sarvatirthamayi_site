@@ -45,7 +45,9 @@ exports.getHomeData = async (req, res) => {
                     id: activeCard.sql_id || 1,
                     start_date: activeCard.start_date,
                     end_date: activeCard.end_date,
-                    membership_card_id: activeCard.membership_card_id?._id || 0,
+
+                    membership_card_id: activeCard.sql_id || 0,
+
                     membership_card_name: activeCard.membership_card_id?.name || "Member",
                     membership_card_description: activeCard.membership_card_id?.description || "Active Club Member",
                     membership_card_visits: activeCard.max_visits || 0,
