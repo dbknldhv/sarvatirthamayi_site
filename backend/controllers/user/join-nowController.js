@@ -1,13 +1,12 @@
-// controllers/user/join-nowController.js
 const Temple = require("../../models/Temple");
 const State = require("../../models/State");
 const Membership = require("../../models/Membership");
 
-// --- 1. Get States (For Dropdown) ---
+// --- 1. Get States ---
 exports.getPublicStates = async (req, res) => {
     try {
-        const uniqueStateNames = await State.distinct("name", { status: 1 });
-        const states = uniqueStateNames.sort().map((name, index) => ({
+        const states = await State.distinct("name", { status: 1 });
+        const formattedStates = states.sort().map((name, index) => ({
             _id: index, 
             name: name
         }));
@@ -15,23 +14,22 @@ exports.getPublicStates = async (req, res) => {
         res.status(200).json({
             status: "true",
             success: true,
-            data: states
+            data: formattedStates
         });
     } catch (error) {
         res.status(500).json({ status: "false", success: false, message: error.message });
     }
 };
 
-// --- 2. Get Public Temples (Matches TempleListModel) ---
+// --- 2. Get Public Temples (Matches TempleMainScreen Grid) ---
 exports.getPublicTemples = async (req, res) => {
     try {
-        const { stateName, search, page = 1, per_page = 10 } = req.query; 
+        const { stateName, search, page = 1, per_page = 15 } = req.query; 
         let query = { status: 1 };
 
         if (stateName && stateName.trim() !== "" && stateName !== "undefined") {
             query.state_name = { $regex: new RegExp(stateName.trim(), "i") };
         }
-        
         if (search && search.trim() !== "") {
             query.name = { $regex: new RegExp(search.trim(), "i") };
         }
@@ -43,9 +41,8 @@ exports.getPublicTemples = async (req, res) => {
             .skip(skip)
             .limit(parseInt(per_page));
 
-        // 🎯 Mapping to match Temple class in Flutter
         const templeData = temples.map(t => ({
-            id: t.sql_id || 0, 
+            id: t._id, // Flutter Bloc uses this to fetch details
             name: t.name || "",
             sequence: t.sequence || 0,
             is_favorite: 0,
@@ -55,7 +52,7 @@ exports.getPublicTemples = async (req, res) => {
 
         return res.status(200).json({
             status: "true",
-            message: "Temples list fetch successfully", // Matches Constants.templeListFetchSuccessMsg
+            message: "Temples list fetch successfully",
             data: {
                 data: templeData,
                 total_count: totalCount,
@@ -63,47 +60,41 @@ exports.getPublicTemples = async (req, res) => {
                 is_prev: parseInt(page) > 1,
                 total_pages: Math.ceil(totalCount / parseInt(per_page)),
                 current_page: parseInt(page),
-                per_page: parseInt(per_page),
-                from: skip + 1,
-                to: skip + templeData.length,
-                next_page_url: null,
-                prev_page_url: null,
-                path: "",
-                has_pages: totalCount > parseInt(per_page),
-                links: []
+                per_page: parseInt(per_page)
             }
         });
     } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
 
-// --- 3. Get Temple By ID (Matches TempleShowDetailModel) ---
+// --- 3. Get Temple Details (Matches TempleDetailScreen.dart) ---
 exports.getPublicTempleById = async (req, res) => {
     try {
         const { id } = req.params;
         const temple = await Temple.findById(id);
 
         if (!temple) {
-            return res.status(404).json({ status: "false", success: false, message: "Temple not found" });
+            return res.status(404).json({ status: "false", message: "Temple not found" });
         }
 
-        // 🎯 Formatting to match Data class in temple_show_model.dart
+        // 🎯 MAPS DIRECTLY TO YOUR FLUTTER UI FIELDS
         const formattedData = {
             id: temple.sql_id || 0,
             name: temple.name || "",
-            short_description: temple.short_description || "",
-            long_description: temple.long_description || "",
-            mobile_number: temple.mobile_number || "",
-            visit_price: String(temple.visit_price || "0"),
+            short_description: temple.short_description || "Gorgeous pagoda gleams golden...",
+            long_description: temple.long_description || temple.description || "",
+            mobile_number: temple.mobile_number || "Contact support",
+            visit_price: String(temple.visit_price || "0"), // String as per model
             address: {
-                full_address: temple.address?.full || temple.full_address || "",
+                full_address: temple.address?.full || "",
+                address_line1: temple.address?.line1 || temple.city_name || "",
+                address_line2: temple.address?.line2 || "",
+                landmark: temple.address?.landmark || "",
                 city: temple.city_name || "",
                 state: temple.state_name || "",
                 pincode: temple.pincode || "",
-                country: "India",
-                latitude: temple.latitude || "",
-                longitude: temple.longitude || ""
+                country: "India"
             },
             open_time: temple.open_time || "06:00 AM",
             close_time: temple.close_time || "09:00 PM",
@@ -115,24 +106,10 @@ exports.getPublicTempleById = async (req, res) => {
 
         res.status(200).json({
             status: "true",
-            message: "Temple fetched successfully.", // Matches Constants.templeDetailFetchSuccessMsg
+            message: "Temple fetched successfully.", 
             data: formattedData
         });
     } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
-    }
-};
-
-// --- 4. Get Membership Plans ---
-exports.getActiveMembershipPlans = async (req, res) => {
-    try {
-        const plans = await Membership.find({ status: 1 }).sort({ price: 1 });
-        res.status(200).json({
-            status: "true",
-            success: true,
-            data: plans
-        });
-    } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
