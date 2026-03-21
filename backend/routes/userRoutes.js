@@ -23,6 +23,8 @@ router.get("/test-route", (req, res) => {
 // --- 4. Public Data Routes (No Auth Required) ---
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/states", joinNowController.getPublicStates);
+router.get("/temple/index", joinNowController.getPublicTemples);
+
 router.get("/temples", joinNowController.getPublicTemples);
 router.get("/temples/:id", joinNowController.getPublicTempleById);
 router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple);

@@ -45,16 +45,27 @@ exports.getPublicTemples = async (req, res) => {
             .select('name image state_name short_description city_name visit_price')
             .sort({ sequence: 1 });
 
-        res.status(200).json({
+        return res.status(200).json({
+            status: "true",      // Flutter expects String "true"
             success: true,
-            count: temples.length,
-            data: temples
+            message: "api.temple_list_success", 
+            data: temples.map(t => ({
+                id: t.sql_id || 0, // MUST be an Integer to avoid 'String' vs 'int?' crash
+                name: t.name || "",
+                image: t.image || "",
+                image_thumb: t.image || "",
+                state_name: t.state_name || "",
+                city_name: t.city_name || "",
+                short_description: t.short_description || "",
+                visit_price: t.visit_price || 0,
+                is_favorite: 0
+            }))
         });
     } catch (error) {
         res.status(500).json({
+            status: "false",
             success: false,
-            message: "Error fetching temples",
-            error: error.message
+            message: error.message
         });
     }
 };
