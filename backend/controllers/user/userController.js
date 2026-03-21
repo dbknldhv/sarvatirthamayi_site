@@ -237,8 +237,7 @@ exports.loginUser = async (req, res) => {
 
 exports.getProfile = async (req, res) => {
     try {
-        // req.user.id comes from your 'protect' middleware
-        const user = await User.findById(req.user.id).select("-password"); 
+        const user = await User.findById(req.user.id).select("-password").lean(); 
 
         if (!user) {
             return res.status(404).json({ 
@@ -248,13 +247,22 @@ exports.getProfile = async (req, res) => {
             });
         }
 
-        // 🎯 We wrap 'user' inside 'data' to satisfy the Flutter Profile Model
+        // 🎯 FIX: Force numeric fields to Strings to satisfy Flutter's 'String?' type
+        const formattedUser = {
+            ...user,
+            id: user._id, // Ensure ID is present
+            mobile_number: user.mobile_number ? String(user.mobile_number) : "",
+            gender: user.gender !== undefined ? String(user.gender) : "1",
+            // If sql_id is causing issues, stringify it too
+            sql_id: user.sql_id ? String(user.sql_id) : null 
+        };
+
         res.status(200).json({ 
-            status: "true",      // Flutter checks for this string
+            status: "true",
             success: true, 
             message: "Profile retrieved successfully",
-            data: user,          // This is what the Flutter 'fromJson' is looking for
-            user: user           // Keeping this for safety
+            data: formattedUser, // Flutter looks here
+            user: formattedUser  // Backup
         });
     } catch (error) {
         res.status(500).json({ 
