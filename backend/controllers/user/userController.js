@@ -236,53 +236,40 @@ exports.loginUser = async (req, res) => {
 // backend/controllers/user/userController.js
 exports.getProfile = async (req, res) => {
     try {
-        // Use .lean() to get a plain JS object we can modify easily
         const user = await User.findById(req.user.id).select("-password").lean(); 
 
         if (!user) {
-            return res.status(404).json({ 
-                status: "false",
-                success: false, 
-                message: "User not found" 
-            });
+            return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        /**
-         * 🎯 FINAL ALIGNMENT FOR FLUTTER:
-         * Flutter's GetProfileModel expects these fields to be Strings.
-         * We force conversion here to avoid "type 'int' is not a subtype of String" crash.
-         */
+        // 🎯 FORCING ALL TYPES TO MATCH FLUTTER MODEL
         const formattedData = {
-            user_id: user.sql_id || 0, // Model expects int?
-            first_name: user.first_name || "",
-            last_name: user.last_name || "",
-            email: user.email || "",
-            // Convert to String to satisfy 'String?' in Flutter
+            // 1. MUST BE INT
+            user_id: parseInt(user.sql_id) || 0, 
+            
+            // 2. MUST BE STRINGS (Nullable)
+            first_name: String(user.first_name || ""),
+            last_name: String(user.last_name || ""),
+            email: String(user.email || ""),
             mobile_number: user.mobile_number ? String(user.mobile_number) : "",
-            date_of_birth: user.date_of_birth || "",
-            // Convert to String
+            date_of_birth: user.date_of_birth ? String(user.date_of_birth) : "",
             gender: user.gender !== undefined ? String(user.gender) : "1",
-            // Convert to String (In your log, this was 3, which caused the crash)
             user_type: user.user_type !== undefined ? String(user.user_type) : "3",
-            profile_picture: user.profile_picture || "",
-            profile_picture_thumb: user.profile_picture || ""
+            profile_picture: user.profile_picture ? String(user.profile_picture) : "",
+            profile_picture_thumb: user.profile_picture ? String(user.profile_picture) : ""
         };
 
+        // 🎯 CHECK: Flutter rest_api.dart handles "api.profile_success" 
+        // Ensure your Constants.profileSuccessMsg matches this string!
         res.status(200).json({ 
-            status: "true",      // Required by rest_api.dart logic
+            status: "true",
             success: true, 
-            message: "Profile retrieved successfully", // Match Constants.profileSuccessMsg
-            data: formattedData, // ProfileBloc looks for the 'data' key
-            user: user           // Included for other legacy uses
+            message: "Profile retrieved successfully", 
+            data: formattedData
         });
 
     } catch (error) {
-        console.error("Profile API Error:", error);
-        res.status(500).json({ 
-            status: "false",
-            success: false, 
-            message: error.message 
-        });
+        res.status(500).json({ success: false, message: error.message });
     }
 };
 
