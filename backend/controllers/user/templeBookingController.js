@@ -112,17 +112,16 @@ exports.verifyAndConfirmBooking = async (req, res) => {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature, bookingData } = req.body;
 
         if (!bookingData?.templeId || !bookingData?.devoteeName) {
-            return res.status(400).json({ success: false, message: "Missing required enrollment information." });
+            return res.status(400).json({ status: "false", success: false, message: "Missing required booking information." });
         }
 
-        // 1. Backend Security Recalculation (Anti-Tamper)
+        // 1. Price Calculation & Signature Verification
         const { finalPrice, basePrice, discountType, voucherId } = await calculatePrice(
             req.user.id, 
             bookingData.templeId, 
             bookingData.voucherCode
         );
 
-        // 2. Signature Verification (Skip for Free/100% Discounted bookings)
         if (finalPrice > 0) {
             const body = razorpay_order_id + "|" + razorpay_payment_id;
             const expectedSignature = crypto
@@ -131,96 +130,117 @@ exports.verifyAndConfirmBooking = async (req, res) => {
                 .digest("hex");
 
             if (expectedSignature !== razorpay_signature) {
-                return res.status(400).json({ success: false, message: "Security Check: Payment verification failed" });
+                return res.status(400).json({ status: "false", success: false, message: "Security Check: Payment verification failed" });
             }
         }
 
-        // 3. Create Database Record
+        // 2. Create Database Record
         const newBooking = new TempleBooking({
             user_id: req.user.id,
             temple_id: bookingData.templeId,
             sql_id: Math.floor(100000 + Math.random() * 900000),
             booking_id: `BK-${Date.now()}`,
-            whatsapp_number: bookingData.whatsappNumber,
+            whatsapp_number: String(bookingData.whatsappNumber || ""),
             devotees_name: bookingData.devoteeName,
             wish: bookingData.specialWish || "",
             date: new Date(bookingData.visitDate),
             original_amount: basePrice,
             paid_amount: finalPrice,
             discount_type: discountType,
-            payment_status: 2, // 2 = Paid/Success
-            booking_status: 2, // 2 = Confirmed
-            payment_type: finalPrice === 0 ? 1 : 2, // 1=Free/Discounted, 2=Razorpay Online
+            payment_status: 2, 
+            booking_status: 2, 
+            payment_type: finalPrice === 0 ? 1 : 2, 
             razorpay_order_id: razorpay_order_id || "FREE_OR_VOUCHER",
             razorpay_payment_id: razorpay_payment_id || "FREE_OR_VOUCHER",
             payment_date: new Date(),
         });
 
         const savedBooking = await newBooking.save();
-
-        // 4. ONE-TIME USE LOCK: "Burn" the voucher code for this user only after success
-        if (voucherId) {
-            await redeemVoucher(voucherId, req.user.id);
-        }
-
+        if (voucherId) await redeemVoucher(voucherId, req.user.id);
         const populatedBooking = await savedBooking.populate("temple_id");
 
-        // 5. Fulfillment: PDF Ticket Generation
-        const ticketFileName = await generateTempleTicket(populatedBooking);
-        const ticketFilePath = path.join(__dirname, "../../public/tickets", ticketFileName);
-        
-        savedBooking.ticket_url = `/tickets/${ticketFileName}`;
-        await savedBooking.save();
-
-        // 6. Branded Email Confirmation
-        const emailContent = `
-            <div style="font-family: sans-serif; padding: 25px; border: 2px solid #7c3aed; border-radius: 15px; max-width: 600px;">
-                <h2 style="color: #7c3aed;">Sacred Visit Confirmed</h2>
-                <p>Pranams, <b>${savedBooking.devotees_name}</b>.</p>
-                <div style="background: #f8fafc; padding: 15px; border-radius: 10px; margin: 20px 0;">
-                    <p><b>Temple:</b> ${populatedBooking.temple_id.name}</p>
-                    <p><b>Visit Date:</b> ${new Date(savedBooking.date).toDateString()}</p>
-                    <p><b>Amount Paid:</b> ₹${savedBooking.paid_amount}</p>
-                    <p><b>Offer Details:</b> ${discountType}</p>
-                </div>
-                <p>Please find your official E-Ticket attached. Present this at the temple desk upon arrival.</p>
-                <p style="color: #64748b; font-size: 11px; margin-top: 30px;">This is an automated confirmation from Sarvatirthamayi Club.</p>
-            </div>
-        `;
-
-        await mailSender(
-            req.user.email,
-            `Sacred Visit Confirmation: ${populatedBooking.temple_id.name}`,
-            emailContent,
-            [{ filename: `Ticket_${savedBooking.booking_id}.pdf`, path: ticketFilePath }]
-        );
+        // 🎯 Format for Flutter (TempleVerifyPaymentModel)
+        const formattedData = {
+            id: savedBooking.sql_id || 0,
+            user_id: 0, 
+            temple_id: 0,
+            temple: {
+                id: populatedBooking.temple_id.sql_id || 0,
+                name: populatedBooking.temple_id.name,
+                short_description: populatedBooking.temple_id.short_description || "",
+                visit_price: String(populatedBooking.temple_id.visit_price),
+                image: populatedBooking.temple_id.image,
+                image_thumb: populatedBooking.temple_id.image
+            },
+            date: savedBooking.date.toISOString().split('T')[0], // YYYY-MM-DD
+            whatsapp_number: savedBooking.whatsapp_number,
+            devotees_name: savedBooking.devotees_name,
+            wish: savedBooking.wish,
+            booking_status: savedBooking.booking_status,
+            payment: {
+                razorpay_order_id: savedBooking.razorpay_order_id,
+                razorpay_payment_id: savedBooking.razorpay_payment_id,
+                razorpay_public_key: process.env.RAZORPAY_KEY_ID,
+                payment_status: savedBooking.payment_status,
+                payment_type: savedBooking.payment_type,
+                payment_date: savedBooking.payment_date.toISOString()
+            },
+            offer_discount_amount: String(basePrice - finalPrice),
+            original_amount: String(basePrice),
+            paid_amount: String(finalPrice),
+            created_at: savedBooking.createdAt.toISOString()
+        };
 
         res.status(200).json({ 
+            status: "true",
             success: true, 
-            ticketUrl: savedBooking.ticket_url, 
-            data: savedBooking 
+            message: "Razorpay payment verified successfully.", // Matches Constants.templeVerifyBookingSuccessMsg
+            data: formattedData 
         });
 
     } catch (error) {
-        console.error("Verification Error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ status: "false", success: false, message: error.message });
     }
 };
 
-/**
- * Fetch all bookings for the logged-in user
- */
+// --- API: Get User Booking History ---
 exports.getMyBookings = async (req, res) => {
     try {
         const bookings = await TempleBooking.find({ user_id: req.user.id })
-            .populate("temple_id", "name image location city_name")
+            .populate("temple_id")
             .sort({ date: -1 });
-        res.status(200).json({ success: true, data: bookings });
+
+        // 🎯 Format for Flutter (GetTempleBookingModel)
+        const formattedBookings = bookings.map(b => ({
+            id: b.sql_id || 0,
+            temple_id: 0,
+            booking_status: b.booking_status,
+            payment_status: b.payment_status,
+            temple: {
+                id: b.temple_id?.sql_id || 0,
+                name: b.temple_id?.name || "",
+                image: b.temple_id?.image || "",
+                visit_price: String(b.temple_id?.visit_price || "0"),
+                short_description: b.temple_id?.short_description || ""
+            }
+        }));
+
+        res.status(200).json({
+            status: "true",
+            message: "Temple booking details fetched successfully.", // Matches Constants.getTempleBookSuccessMsg
+            data: {
+                data: formattedBookings,
+                total_count: formattedBookings.length,
+                is_next: false,
+                is_prev: false,
+                current_page: 1,
+                total_pages: 1
+            }
+        });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
-
 /**
  * Fetch details of a single booking by MongoDB ID
  */
