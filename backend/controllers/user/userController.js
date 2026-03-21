@@ -233,13 +233,35 @@ exports.loginUser = async (req, res) => {
 };
 
 // --- 6. PROFILE MANAGEMENT ---
+// backend/controllers/user/userController.js
+
 exports.getProfile = async (req, res) => {
     try {
+        // req.user.id comes from your 'protect' middleware
         const user = await User.findById(req.user.id).select("-password"); 
-        if (!user) return res.status(404).json({ success: false, message: "User not found" });
-        res.status(200).json({ success: true, user });
+
+        if (!user) {
+            return res.status(404).json({ 
+                status: "false",
+                success: false, 
+                message: "User not found" 
+            });
+        }
+
+        // 🎯 We wrap 'user' inside 'data' to satisfy the Flutter Profile Model
+        res.status(200).json({ 
+            status: "true",      // Flutter checks for this string
+            success: true, 
+            message: "Profile retrieved successfully",
+            data: user,          // This is what the Flutter 'fromJson' is looking for
+            user: user           // Keeping this for safety
+        });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ 
+            status: "false",
+            success: false, 
+            message: error.message 
+        });
     }
 };
 
