@@ -1,10 +1,9 @@
 const express = require('express');
 const router = express.Router();
-// Make sure you have a home controller or use a function in userController
-const { getHomeData } = require('../controllers/homeController'); 
-const { protect } = require('../middleware/authMiddleware'); // Or wherever your protect is
+const homeController = require('../controllers/homeController');
+const { protect } = require('../middleware/authMiddleware');
 
-// This handles: GET /api/v1/home/
-router.get('/', protect, getHomeData);
+// Flutter calls GET /api/v1/home
+router.get('/', protect, homeController.getHomeData);
 
 module.exports = router;

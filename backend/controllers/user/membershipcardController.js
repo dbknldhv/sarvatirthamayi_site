@@ -4,7 +4,6 @@ const Membership = require('../../models/Membership');
 const Temple = require('../../models/Temple');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
-const path = require('path');
 const { generateMembershipCertificate } = require('../../utils/pdfGenerator');
 const mailSender = require("../../utils/mailSender");
 
@@ -20,39 +19,51 @@ const getRazorpayInstance = () => {
 
 /**
  * 1. Create Razorpay Order for Membership
+ * Triggered by: MembershipPurchaseEvent in Flutter
  */
 exports.createMembershipOrder = async (req, res) => {
     try {
-        const { planId } = req.body;
-        if (!planId) return res.status(400).json({ success: false, message: "Membership plan ID is required" });
+        // Flutter sends 'memberShipCardId' in the request body
+        const planId = req.body.memberShipCardId || req.body.planId;
+        
+        if (!planId) {
+            return res.status(400).json({ status: "false", success: false, message: "Membership plan ID is required" });
+        }
 
         const rzp = getRazorpayInstance();
-        if (!rzp) return res.status(500).json({ success: false, message: "Payment Gateway Config Missing" });
+        if (!rzp) {
+            return res.status(500).json({ status: "false", success: false, message: "Payment Gateway Config Missing" });
+        }
 
         const plan = await Membership.findById(planId);
-        if (!plan) return res.status(404).json({ success: false, message: "Selected plan not found" });
+        if (!plan) {
+            return res.status(404).json({ status: "false", success: false, message: "Selected plan not found" });
+        }
 
         const options = {
-            amount: Math.round(plan.price * 100), // paise
+            amount: Math.round(plan.price * 100), // convert to paise
             currency: "INR",
             receipt: `mem_order_${Date.now()}`,
         };
 
         const order = await rzp.orders.create(options);
+        
+        // 🎯 Format to match MemberShipPurchaseModel in Flutter
         res.status(200).json({ 
+            status: "true",
             success: true, 
+            message: "api.member_ship_purchase_success", // Match Constants.memberShipPurchaseSuccessMsg
             data: order, 
-            plan_id: plan._id,
-            recalculatedPrice: plan.price 
+            plan_id: plan._id 
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: "Order creation failed", error: error.message });
+        res.status(500).json({ status: "false", success: false, message: error.message });
     }
 };
 
 /**
  * 2. Verify Payment & Activate Membership
- * Includes logic to update User status for platform-wide discounts.
+ * Triggered by: MembershipVerifyPaymentEvent in Flutter
  */
 exports.verifyAndActivateMembership = async (req, res) => {
     try {
@@ -60,142 +71,112 @@ exports.verifyAndActivateMembership = async (req, res) => {
             razorpay_payment_id, 
             razorpay_order_id, 
             razorpay_signature, 
-            plan_id,
-            birthday, 
-            importantDate, 
-            favoriteTemples 
+            plan_id 
         } = req.body;
 
-        // Validation: Ensure all Razorpay fields and Plan ID exist
         if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature || !plan_id) {
-            return res.status(400).json({ success: false, message: "Missing required payment verification details" });
+            return res.status(400).json({ status: "false", success: false, message: "Missing payment verification details" });
         }
 
-        // 1. Signature Verification
-        const key_secret = process.env.RAZORPAY_KEY_SECRET;
+        // Signature Verification
         const generated_signature = crypto
-            .createHmac("sha256", key_secret)
+            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
             .update(razorpay_order_id + "|" + razorpay_payment_id)
             .digest("hex");
 
         if (generated_signature !== razorpay_signature) {
-            return res.status(400).json({ success: false, message: "Transaction verification failed: Invalid Signature" });
+            return res.status(400).json({ status: "false", success: false, message: "Invalid Signature" });
         }
 
         const plan = await Membership.findById(plan_id);
-        if (!plan) return res.status(404).json({ success: false, message: "Membership plan not found" });
+        if (!plan) return res.status(404).json({ message: "Plan not found" });
 
-        // 2. Calculate Membership Expiry
+        // Calculate Dates
         const start_date = new Date();
         const end_date = new Date();
-        if (plan.duration_type === 2) { // 2 = Years (Legacy SQL mapping)
+        if (plan.duration_type === 2) { // Years
             end_date.setFullYear(start_date.getFullYear() + plan.duration);
-        } else { // 1 = Months
+        } else { // Months
             end_date.setMonth(start_date.getMonth() + plan.duration);
         }
 
-        // 3. Create Purchased Card Record
+        // Create Record
         const newCard = await PurchasedMemberCard.create({
             user_id: req.user.id,
             membership_card_id: plan._id,
-            card_status: 1, // 1: Active
+            card_status: 1,
             start_date,
             end_date,
             max_visits: plan.visits,
-            payment_status: 2, // 2: Paid
+            payment_status: 2, // Paid
             razorpay_order_id,
             razorpay_payment_id,
-            payment_date: new Date(),
             membership_card_amount: plan.price,
             paid_amount: plan.price,
-            birthday: birthday ? new Date(birthday) : null,
-            important_date: importantDate ? new Date(importantDate) : null,
-            favorite_temples: favoriteTemples || [],
             sql_id: Math.floor(100000 + Math.random() * 900000)
         });
 
-        // 4. SYNC USER DISCOUNTS: Update User to "active" status
-        // This ensures calculatePrice in Temple/Ritual controllers sees the user as a member
+        // Sync User status
         const updatedUser = await User.findByIdAndUpdate(
             req.user.id, 
-            { 
-                is_member: true, 
-                status: 1, 
-                membership: "active" 
-            }, 
+            { is_member: true, membership: "active" }, 
             { new: true }
         );
 
-        // 5. Generate Branded Certificate & Send Email
-        try {
-            // Using the path resolution from our pdfGenerator update
-            const { fileName, filePath } = await generateMembershipCertificate(newCard, updatedUser);
-            
-            const membershipId = `STM-${newCard._id.toString().slice(-12).toUpperCase()}`;
-            const emailBody = `
-                <div style="font-family: sans-serif; padding: 30px; border: 2px solid #fbbf24; border-radius: 20px; max-width: 600px;">
-                    <h2 style="color: #0f172a; border-bottom: 1px solid #fbbf24; padding-bottom: 10px;">Namaste ${updatedUser.name},</h2>
-                    <p>Congratulations! You are now a <strong>Sovereign Member</strong> of the Sarvatirthamayi Club.</p>
-                    
-                    <div style="background: #f8fafc; padding: 15px; border-radius: 10px; margin: 20px 0; border-left: 5px solid #fbbf24;">
-                        <p style="margin: 5px 0;"><b>Membership ID:</b> ${membershipId}</p>
-                        <p style="margin: 5px 0;"><b>Valid Until:</b> ${end_date.toDateString()}</p>
-                    </div>
-
-                    <p>Your official digital certificate is attached to this email. You can also view your card on your profile.</p>
-                    <p style="margin-top: 25px; color: #7c3aed; font-weight: bold;">
-                        Your 0.7% Membership Discount is now automatically applied to all Ritual and Temple assistance bookings!
-                    </p>
-                </div>
-            `;
-
+        // Background: Generate PDF and Email (Don't await to keep response fast)
+        generateMembershipCertificate(newCard, updatedUser).then(async ({ filePath }) => {
+            const membershipId = `STM-${newCard._id.toString().slice(-6).toUpperCase()}`;
             await mailSender(
                 updatedUser.email,
-                "Sovereign Membership Certificate - Sarvatirthamayi",
-                emailBody,
-                [{ filename: `Membership_Certificate_${membershipId}.pdf`, path: filePath }]
+                "Sovereign Membership Activated",
+                ` Namaste ${updatedUser.name}, your membership is active until ${end_date.toDateString()}.`,
+                [{ filename: `Certificate_${membershipId}.pdf`, path: filePath }]
             );
-        } catch (mailError) {
-            console.error("Certificate Generation/Mail Error:", mailError.message);
-            // We don't fail the request here because the DB purchase was successful
-        }
+        }).catch(err => console.error("Email/PDF Error:", err));
 
         res.status(200).json({ 
+            status: "true",
             success: true, 
-            message: "Membership successfully activated", 
+            message: "api.member_ship_verify_payment_success", // Match Constants.memberShipVerifyPaymentSuccessMsg
             data: newCard 
         });
 
     } catch (error) {
-        console.error("Membership Verification Error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ status: "false", success: false, message: error.message });
     }
 };
 
 /**
- * 3. Fetch My Membership Card details
+ * 3. Fetch Active Plans for Buying
+ * Triggered by: MembershipCardResponse in Flutter
  */
-exports.getMyMembershipCard = async (req, res) => {
+exports.getActiveMemberships = async (req, res) => {
     try {
-        const card = await PurchasedMemberCard.findOne({ 
-            user_id: req.user.id, 
-            payment_status: 2 
-        }).sort({ created_at: -1 });
+        const plans = await Membership.find({ status: 1 }).sort({ price: 1 });
 
-        if (!card) {
-            return res.status(404).json({ success: false, message: "No active membership found for this account" });
-        }
-
-        // Fetch details of favorite temples stored on the card
-        const templeDetails = await Temple.find({
-            name: { $in: card.favorite_temples }
-        }).select('name image location city_name');
-
-        res.status(200).json({ 
-            success: true, 
-            data: { ...card._doc, templeDetails } 
+        // 🎯 MUST wrap in the 'data.data' pagination envelope for Flutter's Bloc
+        return res.status(200).json({
+            status: "true",
+            success: true,
+            message: "api.member_ship_card_success", // Match Constants.memberShipCardSuccessMsg
+            data: {
+                current_page: 1,
+                data: plans.map(plan => ({
+                    id: plan._id,
+                    membership_card_id: plan.sql_id || 0,
+                    membership_card_name: plan.name,
+                    membership_card_description: plan.description,
+                    membership_card_price: String(plan.price),
+                    membership_card_visits: plan.visits,
+                    membership_card_duration: plan.duration,
+                    membership_card_duration_type: plan.duration_type
+                })),
+                next_page_url: null,
+                prev_page_url: null,
+                total: plans.length
+            }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ status: "false", success: false, message: error.message });
     }
 };
