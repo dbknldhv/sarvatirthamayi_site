@@ -264,7 +264,7 @@ exports.getProfile = async (req, res) => {
         res.status(200).json({ 
             status: "true",
             success: true, 
-            message: "Profile retrieved successfully", 
+            message: "api.profile_success", 
             data: formattedData
         });
 
