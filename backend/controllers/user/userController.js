@@ -234,9 +234,9 @@ exports.loginUser = async (req, res) => {
 
 // --- 6. PROFILE MANAGEMENT ---
 // backend/controllers/user/userController.js
-
 exports.getProfile = async (req, res) => {
     try {
+        // Use .lean() to get a plain JS object we can modify easily
         const user = await User.findById(req.user.id).select("-password").lean(); 
 
         if (!user) {
@@ -247,24 +247,37 @@ exports.getProfile = async (req, res) => {
             });
         }
 
-        // 🎯 FIX: Force numeric fields to Strings to satisfy Flutter's 'String?' type
-        const formattedUser = {
-            ...user,
-            id: user._id, // Ensure ID is present
+        /**
+         * 🎯 FINAL ALIGNMENT FOR FLUTTER:
+         * Flutter's GetProfileModel expects these fields to be Strings.
+         * We force conversion here to avoid "type 'int' is not a subtype of String" crash.
+         */
+        const formattedData = {
+            user_id: user.sql_id || 0, // Model expects int?
+            first_name: user.first_name || "",
+            last_name: user.last_name || "",
+            email: user.email || "",
+            // Convert to String to satisfy 'String?' in Flutter
             mobile_number: user.mobile_number ? String(user.mobile_number) : "",
+            date_of_birth: user.date_of_birth || "",
+            // Convert to String
             gender: user.gender !== undefined ? String(user.gender) : "1",
-            // If sql_id is causing issues, stringify it too
-            sql_id: user.sql_id ? String(user.sql_id) : null 
+            // Convert to String (In your log, this was 3, which caused the crash)
+            user_type: user.user_type !== undefined ? String(user.user_type) : "3",
+            profile_picture: user.profile_picture || "",
+            profile_picture_thumb: user.profile_picture || ""
         };
 
         res.status(200).json({ 
-            status: "true",
+            status: "true",      // Required by rest_api.dart logic
             success: true, 
-            message: "Profile retrieved successfully",
-            data: formattedUser, // Flutter looks here
-            user: formattedUser  // Backup
+            message: "Profile retrieved successfully", // Match Constants.profileSuccessMsg
+            data: formattedData, // ProfileBloc looks for the 'data' key
+            user: user           // Included for other legacy uses
         });
+
     } catch (error) {
+        console.error("Profile API Error:", error);
         res.status(500).json({ 
             status: "false",
             success: false, 
