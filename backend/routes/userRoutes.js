@@ -59,13 +59,14 @@ router.get('/profile', protect, userController.getProfile);
  * You must include 'protect' here, otherwise 'req.user.id' inside the controller 
  * will be undefined, causing a 500 error.
  */
+router.post('/profile', protect, upload.fields([
+    { name: 'profile_picture', maxCount: 1 }
+]), userController.updateProfile);
+
+// You can keep the others for safety
 router.put('/update-profile', protect, upload.fields([
     { name: 'profile_picture', maxCount: 1 },
     { name: 'bannerImage', maxCount: 1 }
-]), userController.updateProfile);
-
-router.put('/profile', protect, upload.fields([
-    { name: 'profile_picture', maxCount: 1 }
 ]), userController.updateProfile);
 
 // Voucher Management
