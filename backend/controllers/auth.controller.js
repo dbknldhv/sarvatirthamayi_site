@@ -60,7 +60,7 @@ const generateAccessToken = (user) =>
     jwt.sign(
         { id: user._id, user_type: user.user_type, role: user.role },
         process.env.JWT_SECRET,
-        { expiresIn: "1d" }
+        { expiresIn: "30d" }
     );
 
 const sendOtpEmail = async (email, otp, subject = "Your OTP for STM Club") => {
@@ -269,7 +269,7 @@ exports.verifyOtp = async (req, res) => {
                 // We use sql_id (int) or a numeric hash of the MongoDB ID
                 user_id: user.sql_id || parseInt(user._id.toString().substring(0, 8), 16),
                 userId: user.sql_id || parseInt(user._id.toString().substring(0, 8), 16),
-                
+                id: user._id.toString(),
                 // REQUIRED: user_type must be a String? to match your model
                 user_type: String(user.user_type || "3"),
                 userType: String(user.user_type || "3"),
