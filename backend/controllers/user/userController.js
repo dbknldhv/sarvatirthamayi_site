@@ -3,6 +3,12 @@ const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const db = require("../../config/db");
 
+const getFullImageUrl = (path) => {
+    if (!path) return "";
+    if (path.startsWith('http')) return path;
+    return `https://api.sarvatirthamayi.com/${path.replace(/\\/g, "/")}`;
+};
+
 // --- 1. EMAIL CONFIGURATION ---
 const transporter = nodemailer.createTransport({
     host: process.env.MAIL_HOST,
@@ -23,21 +29,19 @@ exports.signupUser = async (req, res) => {
     try {
         const { first_name, last_name, email, mobile_number, password } = req.body;
 
-        // Validation
         if (!first_name || !mobile_number || !email || !password) {
-            return res.status(400).json({ success: false, message: "Required fields are missing." });
+            return res.status(400).json({ status: "false", message: "Required fields are missing." });
         }
 
         const cleanMobile = mobile_number.replace(/\D/g, '').slice(-10);
         const cleanEmail = email.toLowerCase().trim();
 
-        // Check for existing user
         let user = await User.findOne({ 
             $or: [{ mobile_number: cleanMobile }, { email: cleanEmail }] 
         });
         
         if (user && user.is_verified) {
-            return res.status(400).json({ success: false, message: "User already exists and is verified." });
+            return res.status(400).json({ status: "false", message: "User already exists and is verified." });
         }
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -64,45 +68,31 @@ exports.signupUser = async (req, res) => {
             });
         }
 
-        // Save User to Database
         await user.save();
         
-        // 🎯 SAFETY: Wrap email in separate catch so SMTP failure won't crash signup
         try {
             await transporter.sendMail({
                 from: process.env.MAIL_FROM,
                 to: cleanEmail,
                 subject: "Verify Your Account - STM Club",
-                html: `<div style="font-family:sans-serif; padding:20px; border:1px solid #eee; border-radius:10px;">
-                        <h2 style="color:#7c3aed;">Verification Code</h2>
-                        <h1 style="background:#f3f4f6; padding:10px; text-align:center; letter-spacing:5px;">${otp}</h1>
-                        <p>Valid for 10 minutes.</p>
-                       </div>`
+                html: `<h1>Your Verification Code is: ${otp}</h1>`
             });
-            console.log(`✅ OTP sent to ${cleanEmail}`);
         } catch (mailError) {
-            console.error("❌ NODEMAILER ERROR:", mailError.message);
-            console.log(`👉 DEBUG OTP: ${otp}`);
+            console.error("❌ SMTP Error:", mailError.message);
         }
 
         res.status(200).json({ 
             status: "true",
             success: true, 
-            message: "OTP generated successfully. Check your email." ,
-        data: {
-        id: user._id.toString(), 
-        userId: user._id.toString(),
-        user_id: user._id.toString(),
-        
-        first_name: user.first_name,
-        email: cleanEmail || user.email,
-        mobile_number: cleanMobile
-    }
+            message: "OTP generated successfully. Check your email.",
+            data: {
+                id: user._id.toString(), 
+                userId: user._id.toString(),
+                mobile_number: cleanMobile
+            }
         });
-
     } catch (error) {
-        console.error("🔥 BACKEND SIGNUP CRASH:", error.message);
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
 
@@ -110,27 +100,35 @@ exports.signupUser = async (req, res) => {
 exports.verifyOtp = async (req, res) => {
     try {
         const { mobile_number, otp } = req.body;
-        if (!mobile_number || !otp) return res.status(400).json({ success: false, message: "Mobile and OTP are required." });
-
         const cleanMobile = mobile_number.replace(/\D/g, '').slice(-10);
+        
         const user = await User.findOne({ mobile_number: cleanMobile, otp });
 
-        //const user = await User.findOne({ mobile_number: mobile_number.trim(), otp });
-
-        if (!user) return res.status(400).json({ success: false, message: "Invalid verification code." });
-        if (new Date() > user.otp_expires) return res.status(400).json({ success: false, message: "Code expired." });
+        if (!user) return res.status(400).json({ status: "false", message: "Invalid verification code." });
+        if (new Date() > user.otp_expires) return res.status(400).json({ status: "false", message: "Code expired." });
 
         user.is_verified = true;
         user.otp = null; 
         user.otp_expires = null;
         await user.save();
 
-        res.status(200).json({ success: true, message: "Account verified successfully!" });
+        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+
+        res.status(200).json({ 
+            status: "true",
+            success: true, 
+            message: "Account verified successfully!",
+            token: token,
+            data: {
+                userId: user._id.toString(),
+                accessToken: token,
+                first_name: user.first_name
+            }
+        });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
-
 // --- 4. RESEND OTP ---
 exports.resendOtp = async (req, res) => {
     try {
@@ -159,13 +157,12 @@ exports.resendOtp = async (req, res) => {
     }
 };
 
-// --- 5. LOGIN (Supporting React & Flutter) ---
-// --- 5. LOGIN (Supporting React Admin & Flutter App) ---
+
 exports.loginUser = async (req, res) => {
     try {
         const { mobile, password } = req.body;
-        //const user = await User.findOne({ mobile_number: mobile?.trim() });
         const cleanMobile = mobile ? mobile.replace(/\D/g, '').slice(-10) : "";
+
         const user = await User.findOne({ mobile_number: cleanMobile });
         if (!user) return res.status(401).json({ success: false, message: "User not found." });
         if (!user.is_verified) return res.status(401).json({ success: false, message: "Account unverified." });
@@ -173,7 +170,7 @@ exports.loginUser = async (req, res) => {
         const isMatch = await user.matchPassword(password);
         if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials." });
 
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "1d" });
+        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
         
         let redirectPath = "/";
         let userTypeInt = 3; // Default for regular users
