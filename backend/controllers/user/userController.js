@@ -207,7 +207,7 @@ exports.loginUser = async (req, res) => {
                 access_token: token,
                 accesstoken: token,  
                 email: user.email,
-                profile_picture: user.profile_picture || ""
+                profile_picture: getFullImageUrl(user.profile_picture)
             },
 
             // 🎯 REACT/ADMIN USER OBJECT
