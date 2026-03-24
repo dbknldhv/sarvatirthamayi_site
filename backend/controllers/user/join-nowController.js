@@ -172,7 +172,7 @@ exports.getActiveMembershipPlans = async (req, res) => {
             status: "true",
             success: true,
             message: "Membership plans fetched successfully",
-            count: plans.length,
+            //count: plans.length,
             data: plans
         });
     } catch (error) {
