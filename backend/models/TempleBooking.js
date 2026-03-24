@@ -19,6 +19,7 @@ const templeBookingSchema = new mongoose.Schema(
     
     razorpay_order_id: { type: String, default: null },
     razorpay_payment_id: { type: String, default: null },
+    razorpay_signature: { type: String, default: null }, // new added
     payment_date: { type: Date, default: null },
     
     purchased_member_card_id: { type: Number, default: null },
