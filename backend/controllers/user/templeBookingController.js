@@ -141,7 +141,9 @@ exports.createTempleBookingOrder = async (req, res) => {
             data: {
                 payment: {
                     razorpay_order_id: orderId,
-                    razorpay_public_key: publicKey
+                    razorpay_public_key: process.env.RAZORPAY_KEY_ID,
+                    payment_status: 1, // 1: Pending
+                    payment_type: 2    // 2: Online
                 }
             }
         });
