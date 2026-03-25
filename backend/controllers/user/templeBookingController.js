@@ -86,17 +86,26 @@ exports.createTempleBookingOrder = async (req, res) => {
     try {
         const { templeId, devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
 
-        // 1. Find Temple
+        // 1. Find Temple (Searching by sql_id as sent from APK)
         const temple = await Temple.findOne({ sql_id: templeId });
-        if (!temple) return res.status(404).json({ status: "false", message: "Temple not found" });
+        if (!temple) {
+            return res.status(404).json({ 
+                status: "false", 
+                success: false, 
+                message: "Temple not found" 
+            });
+        }
 
+        // 2. Razorpay Order Logic
         const amountInPaise = parseInt(temple.visit_price || 0) * 100;
         let orderId = `FREE_${Date.now()}`;
         const publicKey = process.env.RAZORPAY_KEY_ID;
 
-        // 2. Razorpay Order
         if (amountInPaise > 0) {
             const rzp = getRazorpayInstance();
+            if (!rzp) {
+                return res.status(500).json({ status: "false", message: "Razorpay Key missing" });
+            }
             const order = await rzp.orders.create({
                 amount: amountInPaise,
                 currency: "INR",
@@ -105,7 +114,7 @@ exports.createTempleBookingOrder = async (req, res) => {
             orderId = order.id;
         }
 
-        // 3. Save Pending Record
+        // 3. Save Record to MongoDB
         const newBooking = new TempleBooking({
             user_id: req.user.id,
             temple_id: temple._id,
@@ -117,24 +126,26 @@ exports.createTempleBookingOrder = async (req, res) => {
             original_amount: String(temple.visit_price),
             paid_amount: String(temple.visit_price),
             razorpay_order_id: orderId,
-            booking_status: 1, 
-            payment_status: 1, 
-            payment_type: paymentType || 2
+            booking_status: 1, // Pending
+            payment_status: 1, // Pending
+            payment_type: paymentType || 2 // Online
         });
         await newBooking.save();
 
-        // 🎯 THE CRITICAL RESPONSE (Mapped exactly to Flutter TempleBookingModel)
+        // 🎯 4. APK COMPATIBLE RESPONSE
+        // This structure satisfies TempleBookingModel.dart parsing
         res.status(200).json({
-            status: "true",
-            message: "api.temple_booking", // Matches Constants.templeBookingSuccessMsg
+            status: "true",                // Flutter check
+            success: true,                 // Web/React check
+            message: "api.temple_booking", // Constants.templeBookingSuccessMsg
             data: {
-                id: newBooking.sql_id,
-                user_id: 0, 
-                temple_id: temple.sql_id,
-                date: newBooking.date.toISOString(), // Required for DateTime.parse
-                whatsapp_number: newBooking.whatsapp_number,
-                devotees_name: newBooking.devotees_name,
-                wish: newBooking.wish,
+                id: parseInt(newBooking.sql_id),
+                user_id: 0,                // Placeholder int
+                temple_id: parseInt(temple.sql_id),
+                date: new Date(date).toISOString().split('T')[0], 
+                whatsapp_number: String(newBooking.whatsapp_number),
+                devotees_name: String(newBooking.devotees_name),
+                wish: String(newBooking.wish),
                 booking_status: 1,
                 offer_discount_amount: "0",
                 original_amount: String(temple.visit_price),
@@ -146,25 +157,31 @@ exports.createTempleBookingOrder = async (req, res) => {
                     razorpay_public_key: publicKey,
                     payment_status: 1,
                     payment_type: 2,
-                    payment_date: null
+                    payment_date: ""
                 },
                 temple: {
-                    id: temple.sql_id,
-                    name: temple.name,
+                    id: parseInt(temple.sql_id),
+                    name: String(temple.name),
                     visit_price: String(temple.visit_price),
                     image: temple.image || "",
                     image_thumb: temple.image || "",
                     address: {
-                        full_address: temple.full_address || ""
+                        full_address: temple.full_address || `${temple.city_name || ""}, ${temple.state_name || ""}`,
+                        city: temple.city_name || "",
+                        state: temple.state_name || ""
                     }
                 }
             }
         });
     } catch (error) {
-        res.status(500).json({ status: "false", message: error.message });
+        console.error("❌ Booking Error:", error.message);
+        res.status(500).json({ 
+            status: "false", 
+            success: false, 
+            message: error.message 
+        });
     }
 };
-
 exports.verifyAndConfirmBooking = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
