@@ -182,10 +182,12 @@ exports.createTempleBookingOrder = async (req, res) => {
         });
     }
 };
+
 exports.verifyAndConfirmBooking = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
+        // 1. Security Check: Verify Signature
         const body = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = crypto
             .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
@@ -193,42 +195,77 @@ exports.verifyAndConfirmBooking = async (req, res) => {
             .digest("hex");
 
         if (expectedSignature !== razorpay_signature) {
-            return res.status(400).json({ status: "false", message: "Invalid Signature" });
+            return res.status(400).json({ 
+                status: "false", 
+                success: false, 
+                message: "Security verification failed" 
+            });
         }
 
+        // 2. Database Update: Find and populate temple details
         const booking = await TempleBooking.findOne({ razorpay_order_id }).populate("temple_id");
-        if (!booking) return res.status(404).json({ status: "false", message: "Booking not found" });
+        if (!booking) {
+            return res.status(404).json({ 
+                status: "false", 
+                success: false, 
+                message: "Booking record not found" 
+            });
+        }
 
-        booking.payment_status = 2;
-        booking.booking_status = 2;
+        // Update status to Paid (2) and Confirmed (2)
+        booking.payment_status = 2; 
+        booking.booking_status = 2; 
         booking.razorpay_payment_id = razorpay_payment_id;
         booking.payment_date = new Date();
+        
         await booking.save();
 
-        // 🎯 THE CRITICAL VERIFY RESPONSE (Mapped to TempleVerifyPaymentModel)
+        // 🎯 3. APK COMPATIBLE RESPONSE
+        // Matches TempleVerifyPaymentModel.dart exactly
         res.status(200).json({
-            status: "true",
-            message: "Razorpay payment verified successfully.", // Matches Constants.templeVerifyBookingSuccessMsg
+            status: "true",                                     // Flutter check
+            success: true,                                      // React check
+            message: "Razorpay payment verified successfully.", // Constants.templeVerifyBookingSuccessMsg
             data: {
-                id: booking.sql_id,
-                date: booking.date.toISOString(),
-                devotees_name: booking.devotees_name,
-                whatsapp_number: booking.whatsapp_number,
+                id: parseInt(booking.sql_id) || 0,
+                user_id: 0,
+                temple_id: parseInt(booking.temple_id?.sql_id) || 0,
+                date: booking.date.toISOString(),               // ISO string for DateTime.parse()
+                whatsapp_number: String(booking.whatsapp_number || ""),
+                devotees_name: String(booking.devotees_name || ""),
+                wish: String(booking.wish || ""),
                 booking_status: 2,
+                offer_discount_amount: "0",
+                original_amount: String(booking.original_amount),
                 paid_amount: String(booking.paid_amount),
+                created_at: booking.createdAt ? booking.createdAt.toISOString() : new Date().toISOString(),
                 payment: {
-                    razorpay_order_id: booking.razorpay_order_id,
-                    razorpay_payment_id: booking.razorpay_payment_id,
-                    payment_status: 2
+                    razorpay_order_id: String(booking.razorpay_order_id),
+                    razorpay_payment_id: String(booking.razorpay_payment_id),
+                    razorpay_public_key: process.env.RAZORPAY_KEY_ID,
+                    payment_status: 2,
+                    payment_type: 2,
+                    payment_date: booking.payment_date.toISOString()
                 },
                 temple: {
-                    name: booking.temple_id.name,
-                    image: booking.temple_id.image || ""
+                    id: parseInt(booking.temple_id?.sql_id) || 0,
+                    name: String(booking.temple_id?.name || ""),
+                    image: booking.temple_id?.image || "",
+                    image_thumb: booking.temple_id?.image || "",
+                    visit_price: String(booking.temple_id?.visit_price || "0"),
+                    address: {
+                        full_address: booking.temple_id?.full_address || ""
+                    }
                 }
             }
         });
     } catch (error) {
-        res.status(500).json({ status: "false", message: error.message });
+        console.error("❌ Verification Error:", error.message);
+        res.status(500).json({ 
+            status: "false", 
+            success: false, 
+            message: error.message 
+        });
     }
 };
 
