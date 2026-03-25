@@ -22,10 +22,17 @@ router.get("/test-route", (req, res) => {
 // --- 4. Public Data Routes ---
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/states", joinNowController.getPublicStates);
-router.get("/temple/index", joinNowController.getPublicTemples);
+
+router.get("/temple/index", joinNowController.getPublicTemples); // Matches ApiCon.templeList
+router.post("/temple/show", joinNowController.getPublicTempleById); // Matches ApiCon.templeShow
 router.get("/temples", joinNowController.getPublicTemples);
 router.get("/temples/:id", joinNowController.getPublicTempleById);
 router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple);
+
+
+// --- 🎯 FLUTTER ALIGNMENT: Ritual Public Routes ---
+router.get("/ritual/index", ritualController.getAllRituals); // Matches ApiCon.ritual
+router.post("/ritual/show", ritualController.getRitualDetailsWithPackages); // Matches ApiCon.ritualShow
 
 // Ritual Metadata
 router.get("/rituals", ritualController.getAllRituals); 
@@ -57,8 +64,8 @@ router.put('/update-profile', protect, upload.fields([
     { name: 'bannerImage', maxCount: 1 }
 ]), userController.updateProfile);
 
-router.get("/vouchers/available", protect, userVoucherController.getAvailableVouchers);
-router.post("/vouchers/verify", protect, userVoucherController.verifyVoucherForUser);
+//router.get("/vouchers/available", protect, userVoucherController.getAvailableVouchers);
+//router.post("/vouchers/verify", protect, userVoucherController.verifyVoucherForUser);
 
 // Membership
 router.get('/my-membership', protect, cardController.getMyMembershipCard);
