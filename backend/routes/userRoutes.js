@@ -85,7 +85,7 @@ router.post('/card/verify-payment', protect, cardController.verifyAndActivateMem
 router.post('/book-temple/create-order', protect, templeBookingController.createTempleBookingOrder);
 router.post('/book-temple/verify', protect, templeBookingController.verifyAndConfirmBooking);
 router.get('/my-temple-bookings', protect, templeBookingController.getMyBookings);
-router.get("/temples/:id", joinNowController.getPublicTempleById);
+//router.get("/temples/:id", joinNowController.getPublicTempleById);
 router.post("/temple/show", joinNowController.getPublicTempleById);
 
 // Ritual Booking Flow
