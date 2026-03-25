@@ -83,24 +83,34 @@ exports.checkBookingPrice = async (req, res) => {
 };
 
 // --- API: Create Razorpay Order ---
+// --- API: Create Razorpay Order ---
 exports.createTempleBookingOrder = async (req, res) => {
     try {
         const { templeId, devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
 
+        // 1. Find Temple
         const temple = await Temple.findOne({ sql_id: templeId });
         if (!temple) return res.status(404).json({ status: "false", message: "Temple not found" });
 
         const amount = parseInt(temple.visit_price) * 100;
 
-        // Create Razorpay Order
-        const order = await rzp.orders.create({
-            amount,
-            currency: "INR",
-            receipt: `rcpt_${Date.now()}`
-        });
+        let orderId = "FREE_BOOKING_" + Date.now();
+        let publicKey = process.env.RAZORPAY_KEY_ID;
 
-        // 🎯 CRITICAL: Save the booking as PENDING now
-        // Because the released APK won't send these details again in 'verify'
+        // 2. 🎯 FIX: Get Razorpay Instance
+        if (amount > 0) {
+            const rzp = getRazorpayInstance(); // Call the helper function!
+            if (!rzp) throw new Error("Razorpay instance not initialized. Check .env keys.");
+
+            const order = await rzp.orders.create({
+                amount,
+                currency: "INR",
+                receipt: `rcpt_${Date.now()}`
+            });
+            orderId = order.id;
+        }
+
+        // 3. Save Pending Record (Crucial for your released APK)
         const newBooking = new TempleBooking({
             user_id: req.user.id,
             temple_id: temple._id,
@@ -111,29 +121,32 @@ exports.createTempleBookingOrder = async (req, res) => {
             wish: wish,
             original_amount: temple.visit_price,
             paid_amount: temple.visit_price,
-            razorpay_order_id: order.id, // We will use this to find the record later
-            booking_status: 1, // Pending
-            payment_status: 1, // Pending
+            razorpay_order_id: orderId,
+            booking_status: 1, 
+            payment_status: amount === 0 ? 2 : 1, // Auto-pay if free
             payment_type: paymentType || 2
         });
 
         await newBooking.save();
 
+        // 4. Return response matching your Flutter models
         res.status(200).json({
             status: "true",
             success: true,
             message: "Temple booking initiated successfully",
             data: {
                 payment: {
-                    razorpay_order_id: order.id,
-                    razorpay_public_key: process.env.RAZORPAY_KEY_ID
+                    razorpay_order_id: orderId,
+                    razorpay_public_key: publicKey
                 }
             }
         });
     } catch (error) {
+        console.error("❌ CREATE ORDER ERROR:", error.message);
         res.status(500).json({ status: "false", message: error.message });
     }
 };
+
 // --- API: Verify & Save Booking ---
 exports.verifyAndConfirmBooking = async (req, res) => {
     try {
