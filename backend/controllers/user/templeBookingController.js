@@ -82,31 +82,38 @@ exports.checkBookingPrice = async (req, res) => {
     }
 };
 
-// --- API: Create Razorpay Order ---
-// --- API: Create Razorpay Order ---
-// --- API: Create Razorpay Order ---
+
 exports.createTempleBookingOrder = async (req, res) => {
     try {
         const { templeId, devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
 
+        // 1. Find Temple by sql_id (as sent by Flutter)
         const temple = await Temple.findOne({ sql_id: templeId });
-        if (!temple) return res.status(404).json({ status: "false", message: "Temple not found" });
-
-        const amount = parseInt(temple.visit_price) * 100;
-
-        // 🎯 FIX: Call the helper function to get the instance
-        const razorpayInstance = getRazorpayInstance();
-        if (!razorpayInstance) {
-             return res.status(500).json({ status: "false", message: "Razorpay keys missing in .env" });
+        if (!temple) {
+            return res.status(404).json({ status: "false", message: "Temple not found" });
         }
 
-        // 🎯 FIX: Use the instance you just created
-        const order = await razorpayInstance.orders.create({
-            amount,
-            currency: "INR",
-            receipt: `rcpt_${Date.now()}`
-        });
+        const amount = parseInt(temple.visit_price) * 100; // Convert to Paise
+        let orderId = `FREE_${Date.now()}`;
+        const publicKey = process.env.RAZORPAY_KEY_ID;
 
+        // 2. Create Razorpay Order if price > 0
+        if (amount > 0) {
+            const razorpayInstance = getRazorpayInstance();
+            if (!razorpayInstance) {
+                return res.status(500).json({ status: "false", message: "Razorpay configuration missing" });
+            }
+
+            const order = await razorpayInstance.orders.create({
+                amount,
+                currency: "INR",
+                receipt: `rcpt_${Date.now()}`
+            });
+            orderId = order.id;
+        }
+
+        // 3. Save PENDING record 
+        // We save all details now because the verify API in the APK doesn't send them back
         const newBooking = new TempleBooking({
             user_id: req.user.id,
             temple_id: temple._id,
@@ -114,39 +121,44 @@ exports.createTempleBookingOrder = async (req, res) => {
             devotees_name: devoteeName,
             whatsapp_number: whatsAppNumber,
             date: new Date(date),
-            wish: wish,
+            wish: wish || "",
             original_amount: temple.visit_price,
             paid_amount: temple.visit_price,
-            razorpay_order_id: order.id,
-            booking_status: 1, 
-            payment_status: 1, 
-            payment_type: paymentType || 2
+            razorpay_order_id: orderId,
+            booking_status: 1, // 1: Pending
+            payment_status: amount === 0 ? 2 : 1, // 2: Paid if free, else 1: Pending
+            payment_type: paymentType || 2 // Default to Online
         });
 
         await newBooking.save();
 
+        // 4. THE CRITICAL RESPONSE
+        // Must match Flutter Constants.templeBookingSuccessMsg ("api.temple_booking")
         res.status(200).json({
             status: "true",
             success: true,
-            message: "Temple booking initiated successfully", // 🎯 Match Constants.templeBookingSuccessMsg
+            message: "api.temple_booking", 
             data: {
                 payment: {
-                    razorpay_order_id: order.id,
-                    razorpay_public_key: process.env.RAZORPAY_KEY_ID
+                    razorpay_order_id: orderId,
+                    razorpay_public_key: publicKey
                 }
             }
         });
     } catch (error) {
-        console.error("Payment Error:", error.message);
+        console.error("❌ Order Creation Failed:", error.message);
         res.status(500).json({ status: "false", message: error.message });
     }
 };
-// --- API: Verify & Save Booking ---
+
+/**
+ * API: Verify & Confirm Payment
+ */
 exports.verifyAndConfirmBooking = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
-        // 1. Signature Verification
+        // 1. Verify Signature
         const body = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = crypto
             .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
@@ -154,18 +166,15 @@ exports.verifyAndConfirmBooking = async (req, res) => {
             .digest("hex");
 
         if (expectedSignature !== razorpay_signature) {
-            return res.status(400).json({ status: "false", message: "Invalid Signature" });
+            return res.status(400).json({ status: "false", message: "Security verification failed" });
         }
 
-        // 2. 🎯 FIND THE PENDING RECORD
-        // We find the booking using the order_id that the APK just sent back
-        const booking = await TempleBooking.findOne({ razorpay_order_id: razorpay_order_id });
-        
+        // 2. Find and update the pending record
+        const booking = await TempleBooking.findOne({ razorpay_order_id });
         if (!booking) {
             return res.status(404).json({ status: "false", message: "Booking record not found" });
         }
 
-        // 3. UPDATE STATUS
         booking.payment_status = 2; // Paid
         booking.booking_status = 2; // Confirmed
         booking.razorpay_payment_id = razorpay_payment_id;
@@ -174,7 +183,7 @@ exports.verifyAndConfirmBooking = async (req, res) => {
         await booking.save();
         const populated = await booking.populate("temple_id");
 
-        // 4. Response matches TempleVerifyPaymentModel.dart
+        // 3. Response matches TempleVerifyPaymentModel.dart
         res.status(200).json({
             status: "true",
             success: true,
