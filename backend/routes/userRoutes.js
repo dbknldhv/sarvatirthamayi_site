@@ -9,6 +9,7 @@ const cardController = require("../controllers/user/membershipcardController");
 const templeBookingController = require("../controllers/user/templeBookingController");
 const ritualController = require("../controllers/user/ritualController");
 const userVoucherController = require("../controllers/user/userVoucherController");
+// const donationController = require("../controllers/user/donationController"); // Uncomment when ready
 
 // --- 2. Import Middleware ---
 const { protect } = require('../middleware/authMiddleware');
@@ -23,22 +24,17 @@ router.get("/test-route", (req, res) => {
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/states", joinNowController.getPublicStates);
 
-router.get("/temple/index", joinNowController.getPublicTemples); // Matches ApiCon.templeList
-router.post("/temple/show", joinNowController.getPublicTempleById); // Matches ApiCon.templeShow
+// --- 🎯 FLUTTER ALIGNMENT: Temple Public Routes ---
+router.get("/temple/index", joinNowController.getPublicTemples); 
+router.post("/temple/show", joinNowController.getPublicTempleById); 
 router.get("/temples", joinNowController.getPublicTemples);
 router.get("/temples/:id", joinNowController.getPublicTempleById);
 router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple);
 
-
 // --- 🎯 FLUTTER ALIGNMENT: Ritual Public Routes ---
-router.get("/ritual/index", ritualController.getAllRituals); // Matches ApiCon.ritual
-router.post("/ritual/show", ritualController.getRitualDetailsWithPackages); // Matches ApiCon.ritualShow
-
-// Ritual Metadata
-router.get("/rituals", ritualController.getAllRituals); 
-router.get("/rituals/types", ritualController.getRitualTypes);
-router.get("/rituals/temple/:templeId", ritualController.getRitualsByTemple);
-router.get("/rituals/details/:ritualId", ritualController.getRitualDetailsWithPackages);
+router.get("/ritual/index", ritualController.getAllRituals); 
+router.post("/ritual/show", ritualController.getRitualDetailsWithPackages); 
+router.get("/ritual/packages", ritualController.getRitualDetailsWithPackages); // Extra alias for packages
 
 // --- 5. User Authentication (Public) ---
 router.post("/signup", userController.signupUser);
@@ -54,31 +50,37 @@ router.get("/auth/check-auth", protect, (req, res) => {
 });
 
 router.get('/profile', protect, userController.getProfile);
-
-router.post('/profile', protect, upload.fields([
-    { name: 'profile_picture', maxCount: 1 }
-]), userController.updateProfile);
-
+router.post('/profile', protect, upload.fields([{ name: 'profile_picture', maxCount: 1 }]), userController.updateProfile);
 router.put('/update-profile', protect, upload.fields([
     { name: 'profile_picture', maxCount: 1 },
     { name: 'bannerImage', maxCount: 1 }
 ]), userController.updateProfile);
 
-//router.get("/vouchers/available", protect, userVoucherController.getAvailableVouchers);
-//router.post("/vouchers/verify", protect, userVoucherController.verifyVoucherForUser);
+// --- 🎯 FLUTTER ALIGNMENT: Temple Booking Flow ---
+// These are the exact paths from ApiCon in Flutter
+router.post("/temple/booking", protect, templeBookingController.createTempleBookingOrder);
+router.post("/temple/verify-payment", protect, templeBookingController.verifyAndConfirmBooking);
+router.get("/temple/booking-details", protect, templeBookingController.getMyBookings);
 
-// Membership
-router.get('/my-membership', protect, cardController.getMyMembershipCard);
-router.post('/card/create-order', protect, cardController.createMembershipOrder);
-router.post('/card/verify-payment', protect, cardController.verifyAndActivateMembership);
+// --- 🎯 FLUTTER ALIGNMENT: Ritual Booking Flow ---
+router.post("/ritual/booking", protect, ritualController.createRitualOrder);
+router.post("/ritual/verify-payment", protect, ritualController.verifyRitualBooking);
+router.get("/ritual/booking-details", protect, ritualController.verifyRitualBooking); // Alias for details
 
-// Temple Booking Flow
+// --- 🎯 FLUTTER ALIGNMENT: Membership & Cards ---
+router.get('/membership-card/index', protect, cardController.getMyMembershipCard);
+router.post('/membership-card/purchase', protect, cardController.createMembershipOrder);
+router.post('/membership-card/verify-payment', protect, cardController.verifyAndActivateMembership);
+
+// --- 🎯 FLUTTER ALIGNMENT: Donation Flow (Placeholder) ---
+// router.get("/donation/index", donationController.getAllDonations);
+// router.post("/donation/show", donationController.getDonationById);
+// router.post("/donation/give-donation", protect, donationController.createDonationOrder);
+
+// --- Legacy Routes (Keep for Web support) ---
 router.post('/book-temple/create-order', protect, templeBookingController.createTempleBookingOrder);
 router.post('/book-temple/verify', protect, templeBookingController.verifyAndConfirmBooking);
 router.get('/my-temple-bookings', protect, templeBookingController.getMyBookings);
-router.post("/temple/show", joinNowController.getPublicTempleById);
-
-// Ritual Booking Flow
 router.post('/rituals/create-order', protect, ritualController.createRitualOrder);
 router.post('/rituals/verify-booking', protect, ritualController.verifyRitualBooking);
 
