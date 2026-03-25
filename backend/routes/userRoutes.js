@@ -28,7 +28,7 @@ router.get("/temple/index", joinNowController.getPublicTemples);
 router.get("/temples", joinNowController.getPublicTemples);
 router.get("/temples/:id", joinNowController.getPublicTempleById);
 router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple);
-router.get("/membership-plans", joinNowController.getActiveMembershipPlans);
+//router.get("/membership-plans", joinNowController.getActiveMembershipPlans);
 
 
 // Ritual Metadata

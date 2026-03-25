@@ -87,17 +87,15 @@ exports.createTempleBookingOrder = async (req, res) => {
     try {
         const { templeId, devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
 
-        // 1. Find Temple by sql_id (as sent by Flutter)
         const temple = await Temple.findOne({ sql_id: templeId });
         if (!temple) {
             return res.status(404).json({ status: "false", message: "Temple not found" });
         }
 
-        const amount = parseInt(temple.visit_price) * 100; // Convert to Paise
+        const amount = parseInt(temple.visit_price) * 100;
         let orderId = `FREE_${Date.now()}`;
         const publicKey = process.env.RAZORPAY_KEY_ID;
 
-        // 2. Create Razorpay Order if price > 0
         if (amount > 0) {
             const razorpayInstance = getRazorpayInstance();
             if (!razorpayInstance) {
@@ -112,8 +110,6 @@ exports.createTempleBookingOrder = async (req, res) => {
             orderId = order.id;
         }
 
-        // 3. Save PENDING record 
-        // We save all details now because the verify API in the APK doesn't send them back
         const newBooking = new TempleBooking({
             user_id: req.user.id,
             temple_id: temple._id,
@@ -122,28 +118,50 @@ exports.createTempleBookingOrder = async (req, res) => {
             whatsapp_number: whatsAppNumber,
             date: new Date(date),
             wish: wish || "",
-            original_amount: temple.visit_price,
-            paid_amount: temple.visit_price,
+            original_amount: String(temple.visit_price),
+            paid_amount: String(temple.visit_price),
             razorpay_order_id: orderId,
-            booking_status: 1, // 1: Pending
-            payment_status: amount === 0 ? 2 : 1, // 2: Paid if free, else 1: Pending
-            payment_type: paymentType || 2 // Default to Online
+            booking_status: 1, 
+            payment_status: amount === 0 ? 2 : 1,
+            payment_type: paymentType || 2
         });
 
         await newBooking.save();
 
-        // 4. THE CRITICAL RESPONSE
-        // Must match Flutter Constants.templeBookingSuccessMsg ("api.temple_booking")
+        // 🎯 THE CRITICAL RESPONSE: Matches TempleBookingModel.dart exactly
         res.status(200).json({
             status: "true",
             success: true,
             message: "api.temple_booking", 
             data: {
+                id: newBooking.sql_id,
+                user_id: 0, // Model expects int?
+                temple_id: parseInt(templeId), // Model expects int?
+                date: newBooking.date.toISOString(), // Required for DateTime.parse()
+                whatsapp_number: newBooking.whatsapp_number,
+                devotees_name: newBooking.devotees_name,
+                wish: newBooking.wish,
+                booking_status: 1,
+                offer_discount_amount: "0",
+                original_amount: String(temple.visit_price),
+                paid_amount: String(temple.visit_price),
+                created_at: new Date().toISOString(), // Required for DateTime.parse()
                 payment: {
                     razorpay_order_id: orderId,
-                    razorpay_public_key: process.env.RAZORPAY_KEY_ID,
-                    payment_status: 1, // 1: Pending
-                    payment_type: 2    // 2: Online
+                    razorpay_payment_id: "",
+                    razorpay_public_key: publicKey,
+                    payment_status: 1,
+                    payment_type: 2,
+                    payment_date: "" 
+                },
+                temple: {
+                    id: parseInt(templeId),
+                    name: temple.name,
+                    image: temple.image || "",
+                    visit_price: String(temple.visit_price),
+                    address: {
+                        full_address: temple.full_address || ""
+                    }
                 }
             }
         });
