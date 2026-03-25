@@ -85,25 +85,50 @@ exports.checkBookingPrice = async (req, res) => {
 // --- API: Create Razorpay Order ---
 exports.createTempleBookingOrder = async (req, res) => {
     try {
-        const { templeId } = req.body;
-        const { finalPrice } = await calculatePrice(req.user.id, templeId);
+        const { templeId, devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
 
-        if (finalPrice === 0) {
-            return res.status(200).json({ status: "true", success: true, isFree: true, amount: 0 });
-        }
+        const temple = await Temple.findOne({ sql_id: templeId });
+        if (!temple) return res.status(404).json({ status: "false", message: "Temple not found" });
 
-        const rzp = getRazorpayInstance();
+        const amount = parseInt(temple.visit_price) * 100;
+
+        // Create Razorpay Order
         const order = await rzp.orders.create({
-            amount: Math.round(finalPrice * 100),
+            amount,
             currency: "INR",
-            receipt: `rcpt_${Date.now()}`,
+            receipt: `rcpt_${Date.now()}`
         });
 
-        res.status(200).json({ 
-            status: "true", 
-            success: true, 
-            data: order, 
-            finalAmount: finalPrice 
+        // 🎯 CRITICAL: Save the booking as PENDING now
+        // Because the released APK won't send these details again in 'verify'
+        const newBooking = new TempleBooking({
+            user_id: req.user.id,
+            temple_id: temple._id,
+            sql_id: Math.floor(100000 + Math.random() * 900000),
+            devotees_name: devoteeName,
+            whatsapp_number: whatsAppNumber,
+            date: new Date(date),
+            wish: wish,
+            original_amount: temple.visit_price,
+            paid_amount: temple.visit_price,
+            razorpay_order_id: order.id, // We will use this to find the record later
+            booking_status: 1, // Pending
+            payment_status: 1, // Pending
+            payment_type: paymentType || 2
+        });
+
+        await newBooking.save();
+
+        res.status(200).json({
+            status: "true",
+            success: true,
+            message: "Temple booking initiated successfully",
+            data: {
+                payment: {
+                    razorpay_order_id: order.id,
+                    razorpay_public_key: process.env.RAZORPAY_KEY_ID
+                }
+            }
         });
     } catch (error) {
         res.status(500).json({ status: "false", message: error.message });
@@ -112,68 +137,56 @@ exports.createTempleBookingOrder = async (req, res) => {
 // --- API: Verify & Save Booking ---
 exports.verifyAndConfirmBooking = async (req, res) => {
     try {
-        const { razorpay_order_id, razorpay_payment_id, razorpay_signature, bookingData } = req.body;
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
-        const { finalPrice, basePrice, discountType } = await calculatePrice(
-            req.user.id, 
-            bookingData.templeId
-        );
+        // 1. Signature Verification
+        const body = razorpay_order_id + "|" + razorpay_payment_id;
+        const expectedSignature = crypto
+            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+            .update(body.toString())
+            .digest("hex");
 
-        // Verify Signature if not free
-        if (finalPrice > 0) {
-            const body = razorpay_order_id + "|" + razorpay_payment_id;
-            const expectedSignature = crypto
-                .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-                .update(body.toString())
-                .digest("hex");
-
-            if (expectedSignature !== razorpay_signature) {
-                return res.status(400).json({ status: "false", message: "Payment verification failed" });
-            }
+        if (expectedSignature !== razorpay_signature) {
+            return res.status(400).json({ status: "false", message: "Invalid Signature" });
         }
 
-        // 1. Save to MongoDB
-        const newBooking = new TempleBooking({
-            user_id: req.user.id,
-            temple_id: bookingData.templeId,
-            sql_id: Math.floor(100000 + Math.random() * 900000),
-            devotees_name: bookingData.devoteeName,
-            date: new Date(bookingData.visitDate),
-            paid_amount: finalPrice,
-            razorpay_order_id,
-            razorpay_payment_id,
-            booking_status: 2, // Confirmed
-            payment_status: 2  // Paid
-        });
+        // 2. 🎯 FIND THE PENDING RECORD
+        // We find the booking using the order_id that the APK just sent back
+        const booking = await TempleBooking.findOne({ razorpay_order_id: razorpay_order_id });
+        
+        if (!booking) {
+            return res.status(404).json({ status: "false", message: "Booking record not found" });
+        }
 
-        const savedBooking = await newBooking.save();
-        const populated = await savedBooking.populate("temple_id");
+        // 3. UPDATE STATUS
+        booking.payment_status = 2; // Paid
+        booking.booking_status = 2; // Confirmed
+        booking.razorpay_payment_id = razorpay_payment_id;
+        booking.payment_date = new Date();
+        
+        await booking.save();
+        const populated = await booking.populate("temple_id");
 
-        // 2. 🎯 SYNC TO SQL (Crucial for Admin Panel)
-        try {
-            await db.execute(
-                "INSERT INTO temple_bookings (mongo_id, user_id, temple_id, amount, payment_id) VALUES (?, ?, ?, ?, ?)",
-                [savedBooking._id.toString(), req.user.id, bookingData.templeId, finalPrice, razorpay_payment_id]
-            );
-        } catch (sqlErr) { console.error("SQL Sync Failed:", sqlErr.message); }
-
-        // 3. Format Response for Flutter
-        res.status(200).json({ 
+        // 4. Response matches TempleVerifyPaymentModel.dart
+        res.status(200).json({
             status: "true",
-            success: true, 
-            message: "Booking confirmed successfully.",
+            success: true,
+            message: "Razorpay payment verified successfully.",
             data: {
-                id: savedBooking.sql_id,
-                date: savedBooking.date.toISOString().split('T')[0],
-                devotees_name: savedBooking.devotees_name,
-                paid_amount: String(finalPrice),
+                id: booking.sql_id,
+                date: booking.date.toISOString().split('T')[0],
+                devotees_name: booking.devotees_name,
+                payment: {
+                    razorpay_order_id: booking.razorpay_order_id,
+                    razorpay_payment_id: booking.razorpay_payment_id,
+                    payment_status: 2
+                },
                 temple: {
-                    name: populated.temple_id?.name || "Temple",
-                    image: populated.temple_id?.image || ""
+                    name: populated.temple_id.name,
+                    image: populated.temple_id.image
                 }
             }
         });
-
     } catch (error) {
         res.status(500).json({ status: "false", message: error.message });
     }
