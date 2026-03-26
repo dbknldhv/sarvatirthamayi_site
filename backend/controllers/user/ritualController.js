@@ -124,9 +124,16 @@ exports.getRitualDetailsWithPackages = async (req, res) => {
  * Create Razorpay Order
  * Recalculates price including potential voucher discounts.
  */
-exports.createRitualOrder = async (req, res) => {
+eexports.createRitualOrder = async (req, res) => {
     try {
-        const { packageId, voucherCode } = req.body;
+        // 🎯 THE FIX: Support both naming styles
+        const packageId = req.body.packageId || req.body.ritual_package_id;
+        const voucherCode = req.body.voucherCode || req.body.voucher_code;
+
+        if (!packageId) {
+            return res.status(400).json({ success: false, message: "packageId is required" });
+        }
+
         const { finalPrice } = await calculateRitualPrice(req.user.id, packageId, voucherCode);
 
         const rzp = getRazorpayInstance();
@@ -138,6 +145,8 @@ exports.createRitualOrder = async (req, res) => {
         
         res.status(200).json({ 
             success: true, 
+            status: "true", // Added for Flutter compatibility
+            message: "api.ritual_order_created",
             data: order, 
             finalAmount: finalPrice 
         });
@@ -145,7 +154,6 @@ exports.createRitualOrder = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
-
 /**
  * 💳 VERIFY PAYMENT & FINALISE
  * Confirms payment and "burns" the voucher so it's one-time use.
@@ -154,11 +162,21 @@ exports.verifyRitualBooking = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature, bookingData } = req.body;
 
+        // 🎯 THE COMPATIBILITY FIX: Extract data safely from bookingData regardless of naming style
+        const ritualId = bookingData.ritualId || bookingData.ritual_id;
+        const packageId = bookingData.packageId || bookingData.ritual_package_id;
+        const templeId = bookingData.templeId || bookingData.temple_id;
+        const devoteeName = bookingData.devoteeName || bookingData.devotees_name;
+        const whatsappNumber = bookingData.whatsappNumber || bookingData.whatsapp_number;
+        const bookingDate = bookingData.bookingDate || bookingData.date;
+        const voucherCode = bookingData.voucherCode || bookingData.voucher_code;
+        const specialWish = bookingData.specialWish || bookingData.wish || "";
+
         // 1. Security Recalculation (Backend verification of the amount)
         const { finalPrice, basePrice, discountType, voucherId } = await calculateRitualPrice(
             req.user.id, 
-            bookingData.packageId, 
-            bookingData.voucherCode
+            packageId, 
+            voucherCode
         );
 
         // 2. Verify Payment Signature
@@ -174,13 +192,13 @@ exports.verifyRitualBooking = async (req, res) => {
             sql_id: Math.floor(100000 + Math.random() * 900000),
             booking_id: `RIT-${Date.now()}`,
             user_id: req.user.id,
-            ritual_id: bookingData.ritualId,
-            ritual_package_id: bookingData.packageId,
-            temple_id: bookingData.templeId,
-            date: new Date(bookingData.bookingDate || bookingData.date),
-            devotees_name: bookingData.devoteeName,
-            whatsapp_number: bookingData.whatsappNumber,
-            wish: bookingData.specialWish || "",
+            ritual_id: ritualId,
+            ritual_package_id: packageId,
+            temple_id: templeId,
+            date: new Date(bookingDate),
+            devotees_name: devoteeName,
+            whatsapp_number: whatsappNumber,
+            wish: specialWish,
             original_amount: basePrice,
             paid_amount: finalPrice,
             discount_type: discountType,
@@ -203,19 +221,21 @@ exports.verifyRitualBooking = async (req, res) => {
             .populate("ritual_id", "name")
             .populate("temple_id", "name city_name");
 
+        // Generate Receipt
         const fileName = await pdfGenerator.generateRitualReceipt(populatedBooking);
         const receiptPath = path.join(__dirname, "../../public/rituals", fileName);
         
         savedBooking.ticket_url = `/rituals/${fileName}`;
         await savedBooking.save();
 
+        // Send Confirmation Email
         const emailContent = `
             <div style="font-family: sans-serif; padding: 20px; border: 2px solid #7c3aed; border-radius: 15px;">
                 <h2 style="color: #7c3aed;">Sacred Ritual Confirmed</h2>
                 <p>Pranams <b>${savedBooking.devotees_name}</b>,</p>
                 <p>Your ritual <b>${populatedBooking.ritual_id.name}</b> at <b>${populatedBooking.temple_id.name}</b> is confirmed.</p>
                 <p><b>Paid:</b> ₹${savedBooking.paid_amount}</p>
-                <p>Attached is your receipt.</p>
+                <p>Attached is your sacred receipt.</p>
             </div>
         `;
 
@@ -228,6 +248,7 @@ exports.verifyRitualBooking = async (req, res) => {
 
         res.status(200).json({
             success: true,
+            status: "true", // Added for Flutter compatibility
             message: "Ritual Booked Successfully!",
             data: {
                 bookingId: savedBooking.booking_id,
