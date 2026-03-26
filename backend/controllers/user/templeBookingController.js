@@ -15,7 +15,9 @@ exports.createTempleBookingOrder = async (req, res) => {
     try {
         // 🎯 THE FIX: Accept either templeId (Postman) or temple_id (Flutter)
         const templeId = req.body.templeId || req.body.temple_id;
-        const { devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
+        const whatsAppNumber = req.body.whatsAppNumber || req.body.whatsapp_number; // Add this line
+        const devoteesName = req.body.devoteeName || req.body.devotees_name; // Fix name too
+        const { date, wish, paymentType } = req.body;
 
         // --- 1. SAFETY CHECK ---
         const numericTempleId = Number(templeId);
@@ -62,8 +64,8 @@ exports.createTempleBookingOrder = async (req, res) => {
             user_id: req.user._id || req.user.id,
             temple_id: temple._id,
             sql_id: Math.floor(100000 + Math.random() * 900000),
-            devotees_name: devoteeName || "Devotee",
-            whatsapp_number: whatsAppNumber || "",
+            devotees_name: devoteesName || "Devotee",
+            whatsapp_number: whatsAppNumber,
             date: date ? new Date(date) : new Date(),
             wish: wish || "",
             original_amount: String(temple.visit_price || "0"),
