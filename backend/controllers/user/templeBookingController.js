@@ -15,7 +15,8 @@ exports.createTempleBookingOrder = async (req, res) => {
     try {
         const { templeId, devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
 
-        const temple = await Temple.findOne({ sql_id: templeId });
+        //const temple = await Temple.findOne({ sql_id: templeId });
+        const temple = await Temple.findOne({ sql_id: Number(req.body.templeId) });
         if (!temple) {
             return res.status(404).json({ status: "false", success: false, message: "Temple not found" });
         }
