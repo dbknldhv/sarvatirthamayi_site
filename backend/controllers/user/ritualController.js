@@ -161,7 +161,8 @@ exports.createRitualOrder = async (req, res) => {
 exports.verifyRitualBooking = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature, bookingData } = req.body;
-
+        const source = req.body.bookingData || req.body;
+        
         // 🎯 THE COMPATIBILITY FIX: Extract data safely from bookingData regardless of naming style
         const ritualId = bookingData.ritualId || bookingData.ritual_id;
         const packageId = bookingData.packageId || bookingData.ritual_package_id;
