@@ -124,7 +124,7 @@ exports.getRitualDetailsWithPackages = async (req, res) => {
  * Create Razorpay Order
  * Recalculates price including potential voucher discounts.
  */
-eexports.createRitualOrder = async (req, res) => {
+exports.createRitualOrder = async (req, res) => {
     try {
         // 🎯 THE FIX: Support both naming styles
         const packageId = req.body.packageId || req.body.ritual_package_id;
