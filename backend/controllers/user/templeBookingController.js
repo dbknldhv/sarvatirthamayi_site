@@ -15,35 +15,53 @@ exports.createTempleBookingOrder = async (req, res) => {
     try {
         const { templeId, devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
 
-        //const temple = await Temple.findOne({ sql_id: templeId });
-        const temple = await Temple.findOne({ sql_id: Number(req.body.templeId) });
-        if (!temple) {
-            return res.status(404).json({ status: "false", success: false, message: "Temple not found" });
+        // --- 1. SAFETY CHECK: Catch NaN before the DB query ---
+        const numericTempleId = Number(templeId);
+
+        if (!templeId || isNaN(numericTempleId)) {
+            console.error(`🛑 Received invalid templeId: "${templeId}" from ${req.user?.mobile_number || 'Unknown User'}`);
+            return res.status(400).json({ 
+                status: "false", 
+                success: false, 
+                message: "Invalid Temple Selection. Please go back and try again." 
+            });
         }
 
-        const amountInPaise = parseInt(temple.visit_price || 0) * 100;
+        // --- 2. DATABASE LOOKUP ---
+        const temple = await Temple.findOne({ sql_id: numericTempleId });
+        if (!temple) {
+            return res.status(404).json({ 
+                status: "false", 
+                success: false, 
+                message: "Temple details not found in our records." 
+            });
+        }
+
+        // --- 3. PRICE & RAZORPAY LOGIC ---
+        const amountInPaise = Math.round(parseFloat(temple.visit_price || 0) * 100);
         let orderId = `FREE_${Date.now()}`;
         const publicKey = process.env.RAZORPAY_KEY_ID;
 
         if (amountInPaise > 0) {
             const rzp = getRazorpayInstance();
-            if (!rzp) return res.status(500).json({ status: "false", message: "Razorpay Key missing" });
+            if (!rzp) return res.status(500).json({ status: "false", message: "Razorpay Configuration Error" });
             
             const order = await rzp.orders.create({
                 amount: amountInPaise,
                 currency: "INR",
-                receipt: `rcpt_${Date.now()}`
+                receipt: `rcpt_${Date.now()}_${numericTempleId}`
             });
             orderId = order.id;
         }
 
+        // --- 4. CREATE BOOKING RECORD ---
         const newBooking = new TempleBooking({
-            user_id: req.user.id,
+            user_id: req.user._id || req.user.id, // Handles different JWT payloads
             temple_id: temple._id,
             sql_id: Math.floor(100000 + Math.random() * 900000),
-            devotees_name: devoteeName,
-            whatsapp_number: whatsAppNumber,
-            date: new Date(date),
+            devotees_name: devoteeName || "Devotee",
+            whatsapp_number: whatsAppNumber || "",
+            date: date ? new Date(date) : new Date(),
             wish: wish || "",
             original_amount: String(temple.visit_price || "0"),
             paid_amount: String(temple.visit_price || "0"),
@@ -52,10 +70,11 @@ exports.createTempleBookingOrder = async (req, res) => {
             payment_status: 1, 
             payment_type: paymentType || 2 
         });
+        
         await newBooking.save();
 
-        // 🎯 EXACT ALIGNMENT WITH temple_booking_model.dart
-        res.status(200).json({
+        // --- 5. MOBILE APP ALIGNMENT (FINAL RESPONSE) ---
+        return res.status(200).json({
             status: "true",
             success: true,
             message: "api.temple_booking",
@@ -63,7 +82,7 @@ exports.createTempleBookingOrder = async (req, res) => {
                 id: Number(newBooking.sql_id),
                 user_id: 0, 
                 temple_id: Number(temple.sql_id),
-                date: newBooking.date.toISOString(), // Required for DateTime.parse()
+                date: newBooking.date.toISOString(),
                 whatsapp_number: String(newBooking.whatsapp_number || ""),
                 devotees_name: String(newBooking.devotees_name || ""),
                 wish: String(newBooking.wish || ""),
@@ -75,7 +94,7 @@ exports.createTempleBookingOrder = async (req, res) => {
                 payment: {
                     razorpay_order_id: String(orderId),
                     razorpay_payment_id: "",
-                    razorpay_public_key: String(publicKey),
+                    razorpay_public_key: String(publicKey || ""),
                     payment_status: 1,
                     payment_type: 2,
                     payment_date: "" 
@@ -84,23 +103,27 @@ exports.createTempleBookingOrder = async (req, res) => {
                     id: Number(temple.sql_id),
                     name: String(temple.name || ""),
                     short_description: String(temple.short_description || ""),
-                    long_description: String(temple.description || ""),
+                    long_description: String(temple.long_description || ""),
                     visit_price: String(temple.visit_price || "0"),
                     image: String(temple.image || ""),
                     image_thumb: String(temple.image || ""),
                     address: {
-                        full_address: String(temple.full_address || ""),
-                        city: String(temple.city_name || ""),
-                        state: String(temple.state_name || "")
+                        full_address: String(temple.address_line1 || ""),
+                        city: String(temple.city_name || temple.city || ""),
+                        state: String(temple.state_name || temple.state || "")
                     }
                 }
             }
         });
+
     } catch (error) {
-        res.status(500).json({ status: "false", message: error.message });
+        console.error("🔥 Booking Flow Error:", error);
+        return res.status(500).json({ 
+            status: "false", 
+            message: "An internal error occurred. Please try again later." 
+        });
     }
 };
-
 exports.verifyAndConfirmBooking = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
