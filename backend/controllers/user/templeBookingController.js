@@ -13,13 +13,16 @@ const getRazorpayInstance = () => {
 
 exports.createTempleBookingOrder = async (req, res) => {
     try {
-        const { templeId, devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
+        // 🎯 THE FIX: Accept either templeId (Postman) or temple_id (Flutter)
+        const templeId = req.body.templeId || req.body.temple_id;
+        const { devoteeName, date, whatsAppNumber, wish, paymentType } = req.body;
 
-        // --- 1. SAFETY CHECK: Catch NaN before the DB query ---
+        // --- 1. SAFETY CHECK ---
         const numericTempleId = Number(templeId);
 
         if (!templeId || isNaN(numericTempleId)) {
-            console.error(`🛑 Received invalid templeId: "${templeId}" from ${req.user?.mobile_number || 'Unknown User'}`);
+            // This log will now show you EXACTLY what the phone sent if it fails
+            console.error(`🛑 Received invalid ID. Body:`, req.body);
             return res.status(400).json({ 
                 status: "false", 
                 success: false, 
@@ -56,7 +59,7 @@ exports.createTempleBookingOrder = async (req, res) => {
 
         // --- 4. CREATE BOOKING RECORD ---
         const newBooking = new TempleBooking({
-            user_id: req.user._id || req.user.id, // Handles different JWT payloads
+            user_id: req.user._id || req.user.id,
             temple_id: temple._id,
             sql_id: Math.floor(100000 + Math.random() * 900000),
             devotees_name: devoteeName || "Devotee",
@@ -73,7 +76,7 @@ exports.createTempleBookingOrder = async (req, res) => {
         
         await newBooking.save();
 
-        // --- 5. MOBILE APP ALIGNMENT (FINAL RESPONSE) ---
+        // --- 5. MOBILE APP ALIGNMENT ---
         return res.status(200).json({
             status: "true",
             success: true,
@@ -118,10 +121,7 @@ exports.createTempleBookingOrder = async (req, res) => {
 
     } catch (error) {
         console.error("🔥 Booking Flow Error:", error);
-        return res.status(500).json({ 
-            status: "false", 
-            message: "An internal error occurred. Please try again later." 
-        });
+        return res.status(500).json({ status: "false", message: error.message });
     }
 };
 exports.verifyAndConfirmBooking = async (req, res) => {
