@@ -28,13 +28,21 @@ const getRazorpayInstance = () => {
  * --- HELPER: Secure Ritual Price Calculation ---
  * Now integrates both Membership (0.7%) and Voucher logic.
  */
-const calculateRitualPrice = async (userId, packageId, voucherCode = null) => {
+
+
+// --- 1. DATA FETCHING ROUTES ---
+/**
+ * --- HELPER: Secure Ritual Price Calculation ---
+ * Fixed to search by sql_id to bridge Flutter (Number) and MongoDB (ObjectId)
+ */
+const calculateRitualPrice = async (userId, packageSqlId, voucherCode = null) => {
+    // 🎯 THE FIX: Flutter sends the 'sql_id' (Number), so we use findOne
     const [pkg, user] = await Promise.all([
-        RitualPackage.findById(packageId),
+        RitualPackage.findOne({ sql_id: Number(packageSqlId) }),
         User.findById(userId)
     ]);
 
-    if (!pkg) throw new Error("Ritual package not found");
+    if (!pkg) throw new Error(`Ritual package not found for SQL_ID: ${packageSqlId}`);
 
     let basePrice = pkg.price || 0;
     let finalPrice = basePrice;
@@ -47,7 +55,7 @@ const calculateRitualPrice = async (userId, packageId, voucherCode = null) => {
         discountType = "Membership (0.7%)";
     }
 
-    // 2. Apply Voucher Discount (If provided)
+    // 2. Apply Voucher Discount
     if (voucherCode) {
         const voucherResult = await validateVoucher(voucherCode, userId, "ritual", finalPrice);
         finalPrice = voucherResult.finalAmount;
@@ -56,15 +64,13 @@ const calculateRitualPrice = async (userId, packageId, voucherCode = null) => {
     }
 
     return { 
+        pkg, // 🎯 CRITICAL: Return the package document so the controller has the real ._id
         basePrice, 
         finalPrice: Number(finalPrice.toFixed(2)), 
         discountType,
         voucherId
     };
 };
-
-// --- 1. DATA FETCHING ROUTES ---
-
 /**
  * Fetch distinct ritual types for filtering/dropdowns
  */
