@@ -161,42 +161,68 @@ exports.createRitualOrder = async (req, res) => {
  * 💳 VERIFY PAYMENT & FINALISE
  * Confirms payment and "burns" the voucher so it's one-time use.
  */
+
 exports.verifyRitualBooking = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+        
+        // 1. Flatten the data source
         const source = req.body.bookingData || req.body;
         
+        // 2. Extract IDs with fallbacks
         const ritualSqlId = source.ritualId || source.ritual_id;
         const packageSqlId = source.packageId || source.ritual_package_id;
         const templeSqlId = source.templeId || source.temple_id;
 
-        // 🎯 Find Actual MongoDB Docs using SQL_IDs
+        // 🎯 VALIDATION GUARD: Prevent NaN crashes
+        if (!ritualSqlId || !packageSqlId || !templeSqlId) {
+            console.error("🛑 ID Mismatch! Received:", { ritualSqlId, packageSqlId, templeSqlId });
+            return res.status(400).json({ 
+                success: false, 
+                status: "false",
+                message: "Missing Ritual, Package, or Temple ID." 
+            });
+        }
+
+        // 3. Find Actual MongoDB Docs using SQL_IDs
         const [ritualDoc, templeDoc] = await Promise.all([
             Ritual.findOne({ sql_id: Number(ritualSqlId) }),
             mongoose.model('Temple').findOne({ sql_id: Number(templeSqlId) })
         ]);
 
+        // Guard against non-existent records
+        if (!ritualDoc || !templeDoc) {
+            return res.status(404).json({ 
+                success: false, 
+                status: "false",
+                message: "Ritual or Temple record not found in database." 
+            });
+        }
+
+        // 4. Calculate Price & fetch Package Doc
         const { pkg, finalPrice, basePrice, discountType, voucherId } = await calculateRitualPrice(
             req.user.id, 
             packageSqlId, 
             source.voucherCode || source.voucher_code
         );
 
-        // Verify Signature
+        // 5. Verify Razorpay Signature
         const shasum = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET);
         shasum.update(`${razorpay_order_id}|${razorpay_payment_id}`);
+        
         if (shasum.digest("hex") !== razorpay_signature) {
-            return res.status(400).json({ success: false, message: "Invalid Signature" });
+            return res.status(400).json({ success: false, status: "false", message: "Invalid Signature" });
         }
 
+        // 6. Create Booking Entry
         const newBooking = new RitualBooking({
             sql_id: Math.floor(100000 + Math.random() * 900000),
             booking_id: `RIT-${Date.now()}`,
             user_id: req.user.id,
-            ritual_id: ritualDoc._id,        // Use Mongo ID
-            ritual_package_id: pkg._id,      // Use Mongo ID
-            temple_id: templeDoc._id,        // Use Mongo ID
-            date: new Date(source.bookingDate || source.date),
+            ritual_id: ritualDoc._id,
+            ritual_package_id: pkg._id,
+            temple_id: templeDoc._id,
+            date: new Date(source.bookingDate || source.date || Date.now()),
             devotees_name: source.devoteeName || source.devotees_name,
             whatsapp_number: source.whatsappNumber || source.whatsapp_number,
             wish: source.specialWish || source.wish || "",
@@ -211,9 +237,10 @@ exports.verifyRitualBooking = async (req, res) => {
         });
 
         await newBooking.save();
+
+        // 7. Post-Booking Actions (Voucher & Fulfillment)
         if (voucherId) await redeemVoucher(voucherId, req.user.id);
 
-        // Fulfillment
         const populatedBooking = await RitualBooking.findById(newBooking._id)
             .populate("ritual_id", "name")
             .populate("temple_id", "name city_name");
@@ -222,14 +249,23 @@ exports.verifyRitualBooking = async (req, res) => {
         newBooking.ticket_url = `/rituals/${fileName}`;
         await newBooking.save();
 
+        // 8. Final Success Response
         res.status(200).json({
             success: true,
             status: "true",
             message: "Ritual Booked Successfully!",
-            data: { bookingId: newBooking.booking_id, receiptUrl: newBooking.ticket_url }
+            data: { 
+                bookingId: newBooking.booking_id, 
+                receiptUrl: newBooking.ticket_url 
+            }
         });
+
     } catch (error) {
-        console.error("Verification Error:", error);
-        res.status(500).json({ success: false, message: error.message });
+        console.error("🔥 Verification Error:", error);
+        res.status(500).json({ 
+            success: false, 
+            status: "false", 
+            message: error.message 
+        });
     }
 };
