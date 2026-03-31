@@ -39,6 +39,19 @@ router.post("/donation/index", protect, donationController.getDonations);
 router.post("/donation/show", protect, donationController.getDonationById);
 router.post("/donation/update", protect, upload.single('image'), donationController.updateDonation);
 
+router.get("/event/booking-details", protect, (req, res) => {
+    res.status(200).json({ status: "true", success: true, data: { data: [] } });
+});
+
+router.get("/donation/booking-details", protect, (req, res) => {
+    res.status(200).json({ status: "true", success: true, data: { data: [] } });
+});
+
+// Update this one too just in case
+router.get("/ritual/booking-details", protect, (req, res) => {
+    res.status(200).json({ status: "true", success: true, data: { data: [] } });
+});
+
 
 // --- 🎯 FLUTTER ALIGNMENT: Ritual Public Routes ---
 //router.post("/ritual/index", ritualController.getAllRituals); 

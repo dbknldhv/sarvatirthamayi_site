@@ -125,25 +125,17 @@ exports.getRitualsByTemple = async (req, res) => {
 
         // ✅ FIX 2: Ensure nextPageUrl exists (matches Dart model property)
         return res.status(200).json({
-            status: "true",
-            success: true,
-            message: "Rituals fetched successfully", 
-            data: {
-                data: formatted.length > 0 ? formatted : [{
-                    id: 1,
-                    name: "Rituals Coming Soon",
-                    description: "Updating...",
-                    temple_id: Number(temple_id),
-                    image: "https://stm.widgetwing.com/storage/temple_images/22/1753369663.jpg",
-                    image_thumb: "https://stm.widgetwing.com/storage/temple_images/22/1753369663.jpg",
-                    is_favorite: 0,
-                    price: "0",
-                    duration: "0"
-                }],
-                next_page_url: null, // This stops the line 51 crash
-                nextPageUrl: null,    // Double safety for camelCase models
-                total: formatted.length || 1
-            }
+    status: "true",
+    success: true,
+    message: "Rituals fetched successfully",
+    data: {
+        data: formatted,
+        total_count: formatted.length, // 🎯 CRITICAL: Change 'total' to 'total_count'
+        current_page: 1,
+        next_page_url: null,
+        is_next: false,
+        is_prev: false
+    }
         });
     } catch (error) {
         res.status(500).json({ status: "false", message: error.message });
