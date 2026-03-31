@@ -93,7 +93,6 @@ exports.getRitualsByTemple = async (req, res) => {
         const temple_id = req.body.temple_id || req.query.temple_id;
         const baseUrl = "https://api.sarvatirthamayi.com/";
 
-        // 1. Fetch Rituals
         const rituals = await Ritual.find({ 
             $or: [
                 { temple_sql_id: Number(temple_id) },
@@ -102,56 +101,55 @@ exports.getRitualsByTemple = async (req, res) => {
             status: 1 
         }).lean();
 
-        let formatted = rituals.map(r => ({
-            id: Number(r.sql_id) || 0,
-            name: String(r.name || ""),
-            description: String(r.description || ""),
-            temple_id: Number(temple_id),
-            image: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "",
-            image_thumb: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "",
-            is_favorite: 0,
-            price: String(r.price || "0"), // 🎯 CRITICAL: Flutter model expects String
-            duration: String(r.duration || "0")
-        }));
+        const formatted = rituals.map(r => {
+            // ✅ FIX 1: The "Double URL" fix
+            let finalImg = "";
+            if (r.image) {
+                finalImg = r.image.startsWith('http') ? r.image : `${baseUrl}${r.image.replace(/\\/g, '/')}`;
+            } else {
+                finalImg = "https://stm.widgetwing.com/storage/temple_images/22/1753369663.jpg"; // Real fallback image
+            }
 
-        if (formatted.length === 0) {
-            formatted = [{
-                id: 1,
-                name: "No Rituals",
-                description: "Coming Soon",
+            return {
+                id: Number(r.sql_id) || 1,
+                name: String(r.name || ""),
+                description: String(r.description || ""),
                 temple_id: Number(temple_id),
-                image: "",
-                image_thumb: "",
+                image: finalImg,
+                image_thumb: finalImg,
                 is_favorite: 0,
-                price: "0",
-                duration: "0"
-            }];
-        }
+                price: String(r.price || "0"),
+                duration: String(r.duration || "0")
+            };
+        });
 
-        res.status(200).json({
+        // ✅ FIX 2: Ensure nextPageUrl exists (matches Dart model property)
+        return res.status(200).json({
             status: "true",
             success: true,
-            message: "Rituals fetched successfully",
+            message: "Rituals fetched successfully", 
             data: {
-                current_page: 1,
-                data: formatted,
-                first_page_url: `${baseUrl}api/v1/ritual/index?page=1`,
-                from: 1,
-                last_page: 1,
-                last_page_url: `${baseUrl}api/v1/ritual/index?page=1`,
-                links: [],
-                next_page_url: null, // 🎯 Prevents 'nextPageUrl' null check crash
-                path: `${baseUrl}api/v1/ritual/index`,
-                per_page: 15,
-                prev_page_url: null,
-                to: formatted.length,
-                total: formatted.length
+                data: formatted.length > 0 ? formatted : [{
+                    id: 1,
+                    name: "Rituals Coming Soon",
+                    description: "Updating...",
+                    temple_id: Number(temple_id),
+                    image: "https://stm.widgetwing.com/storage/temple_images/22/1753369663.jpg",
+                    image_thumb: "https://stm.widgetwing.com/storage/temple_images/22/1753369663.jpg",
+                    is_favorite: 0,
+                    price: "0",
+                    duration: "0"
+                }],
+                next_page_url: null, // This stops the line 51 crash
+                nextPageUrl: null,    // Double safety for camelCase models
+                total: formatted.length || 1
             }
         });
     } catch (error) {
         res.status(500).json({ status: "false", message: error.message });
     }
 };
+
 exports.getRitualDetailsWithPackages = async (req, res) => {
     try {
         const { ritual_id } = req.body; 

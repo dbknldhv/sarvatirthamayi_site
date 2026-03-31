@@ -11,6 +11,7 @@ const ritualController = require("../controllers/user/ritualController");
 const userVoucherController = require("../controllers/user/userVoucherController");
 const homeController = require("../controllers/user/homeController"); // Add this
 // const donationController = require("../controllers/user/donationController"); // Uncomment when ready
+const donationController = require("../controllers/user/donationController");
 
 // --- 2. Import Middleware ---
 const { protect } = require('../middleware/authMiddleware');
@@ -32,6 +33,11 @@ router.post("/temple/show", joinNowController.getPublicTempleById);
 router.get("/temples", joinNowController.getPublicTemples);
 router.get("/temples/:id", joinNowController.getPublicTempleById);
 router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple);
+
+
+router.post("/donation/index", authMiddleware, donationController.getDonationsByTemple);
+router.post("/donation/show", authMiddleware, donationController.getDonationById);
+
 
 // --- 🎯 FLUTTER ALIGNMENT: Ritual Public Routes ---
 //router.post("/ritual/index", ritualController.getAllRituals); 
