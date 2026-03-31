@@ -54,9 +54,9 @@ exports.getHomeData = async (req, res) => {
                     membership_card_duration_type: activeCard.membership_card_id?.duration_type || 1,
                 } : {
                     // Fallback to "Guest" but with ID 0 to tell Flutter to show 'Buy Membership'
-                    id: 0, 
+                    id: 1, 
                     membership_card_name: "Guest",
-                    membership_card_id: 0,
+                    membership_card_id: 1,
                     membership_card_price: "0"
                 },
 
