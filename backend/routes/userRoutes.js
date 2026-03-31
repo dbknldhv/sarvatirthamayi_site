@@ -41,7 +41,7 @@ router.post("/donation/update", protect, upload.single("image"), donationControl
 // --- Ritual Routes ---
 router.post("/ritual/index", protect, ritualController.getRitualsByTemple);
 router.post("/ritual/show", protect, ritualController.getRitualShow);
-router.get("/ritual/packages", protect, ritualController.getRitualPackages);
+router.post("/ritual/packages", protect, ritualController.getRitualPackages);
 router.post("/ritual/booking", protect, ritualController.createRitualOrder);
 router.post("/ritual/verify-payment", protect, ritualController.verifyRitualBooking);
 router.get("/ritual/booking-details", protect, ritualController.getMyRitualBookings);
