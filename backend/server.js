@@ -108,8 +108,7 @@ app.use('/api/admin/auth', authRoutes);
 app.use("/api/admin", adminRoutes); 
 app.use("/api/user", userRoutes);
 
-// 2. NEW: Flutter Mobile App Routes (v1)
-// This maps /api/v1/login directly to your auth controller
+
 app.use('/api/v1', authRoutes); 
 app.use('/api/v1/user', userRoutes);
 app.use('/api/v1', userRoutes);
