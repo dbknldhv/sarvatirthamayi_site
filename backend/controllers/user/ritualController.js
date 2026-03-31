@@ -7,20 +7,15 @@ const RitualPackage = require("../../models/RitualPackage");
 const RitualBooking =
   mongoose.models.RitualBooking || require("../../models/RitualBooking");
 const Temple = mongoose.models.Temple || require("../../models/Temple");
+const formatImageUrl = require("../../utils/imageUrl");
 
-const API_BASE_URL = "https://api.sarvatirthamayi.com/";
-
-// IMPORTANT:
-// Replace these values with the EXACT strings used in Flutter Constants.
-// The current values are placeholders based on your current backend.
 const FLUTTER_MESSAGES = {
-  ritualListSuccess: process.env.FLUTTER_RITUAL_LIST_SUCCESS || "Rituals list fetched successfully",
-  ritualShowSuccess: process.env.FLUTTER_RITUAL_SHOW_SUCCESS || "Ritual  fetched successfully",
-  ritualPackageSuccess: process.env.FLUTTER_RITUAL_PACKAGE_SUCCESS || "Ritual packages fetched successfully",
-  ritualBookingSuccess: process.env.FLUTTER_RITUAL_BOOKING_SUCCESS || "Ritual booking  successfully",
-  ritualVerifySuccess: process.env.FLUTTER_RITUAL_VERIFY_SUCCESS || "Ritual booking created successfully",
-  ritualBookingDetailsSuccess:
-    process.env.FLUTTER_RITUAL_BOOKING_DETAILS_SUCCESS || "Ritual booking details fetched successfully.",
+  ritualListSuccess: "Ritual list fetch successfully",
+  ritualShowSuccess: "Ritual fetch successfully",
+  ritualPackageSuccess: "Ritual packages fetched successfully",
+  ritualBookingSuccess: "Ritual booking successfully.",
+  ritualVerifySuccess: "Ritual booking created successfully.",
+  ritualBookingDetailsSuccess: "Ritual booking details fetched successfully.",
 };
 
 const getRazorpayInstance = () =>
@@ -53,47 +48,26 @@ const sendError = (res, statusCode, message) =>
     message,
   });
 
-const formatImageUrl = (imgPath) => {
-  if (!imgPath) return "";
-
-  const raw = String(imgPath).trim().replace(/\\/g, "/");
-
-  // Already absolute URL -> return as-is
-  if (/^https?:\/\//i.test(raw)) return raw;
-
-  // localhost URL accidentally stored in DB -> convert to production uploads path
-  if (raw.startsWith("localhost:5000/")) {
-    return `https://${raw}`;
-  }
-
-  if (raw.startsWith("/")) {
-    return `${API_BASE_URL}${raw.slice(1)}`;
-  }
-
-  return `${API_BASE_URL}${raw}`;
-};
-
 const buildTempleAddress = (temple) => {
-  if (!temple || !temple.address) return null;
+  const address = temple?.address || {};
 
   return {
-    full_address: temple.address.full_address || "",
-    address_line1: temple.address.address_line1 || "",
-    address_line2: temple.address.address_line2 || "",
-    landmark: temple.address.landmark || "",
-    city: temple.address.city || "",
-    state: temple.address.state || "",
-    pincode: temple.address.pincode || "",
-    country: temple.address.country || "",
-    latitude: temple.address.latitude || "",
-    longitude: temple.address.longitude || "",
-    address_url: temple.address.address_url || "",
+    full_address: address.full_address || "",
+    address_line1: address.address_line1 || "",
+    address_line2: address.address_line2 || "",
+    landmark: address.landmark || "",
+    city: address.city || "",
+    state: address.state || "",
+    pincode: address.pincode || "",
+    country: address.country || "",
+    latitude: address.latitude || "",
+    longitude: address.longitude || "",
+    address_url: address.address_url || "",
   };
 };
 
 const buildTempleLookup = (templeId) => {
   const numericTempleId = toNumberOrNull(templeId);
-
   return {
     $or: [
       ...(numericTempleId !== null ? [{ sql_id: numericTempleId }] : []),
@@ -104,7 +78,6 @@ const buildTempleLookup = (templeId) => {
 
 const buildRitualLookup = (ritualId) => {
   const numericRitualId = toNumberOrNull(ritualId);
-
   return {
     $or: [
       ...(numericRitualId !== null ? [{ sql_id: numericRitualId }] : []),
@@ -115,7 +88,6 @@ const buildRitualLookup = (ritualId) => {
 
 const buildPackageLookup = (packageId) => {
   const numericPackageId = toNumberOrNull(packageId);
-
   return {
     $or: [
       ...(numericPackageId !== null ? [{ sql_id: numericPackageId }] : []),
@@ -129,14 +101,10 @@ exports.getRitualsByTemple = async (req, res) => {
     const source = { ...req.query, ...req.body };
     const templeId = getSourceValue(source, "temple_id", "templeId");
 
-    if (!templeId) {
-      return sendError(res, 400, "temple_id is required");
-    }
+    if (!templeId) return sendError(res, 400, "temple_id is required");
 
     const temple = await Temple.findOne(buildTempleLookup(templeId)).lean();
-    if (!temple) {
-      return sendError(res, 404, "Temple not found");
-    }
+    if (!temple) return sendError(res, 404, "Temple not found");
 
     const rituals = await Ritual.find({
       temple_id: temple._id,
@@ -190,18 +158,14 @@ exports.getRitualShow = async (req, res) => {
     const ritualId = getSourceValue(source, "ritual_id", "ritualId");
     const templeId = getSourceValue(source, "temple_id", "templeId");
 
-    if (!ritualId) {
-      return sendError(res, 400, "ritual_id is required");
-    }
+    if (!ritualId) return sendError(res, 400, "ritual_id is required");
 
     const ritual = await Ritual.findOne({
       ...buildRitualLookup(ritualId),
       status: 1,
     }).populate("temple_id");
 
-    if (!ritual) {
-      return sendError(res, 404, "Ritual not found");
-    }
+    if (!ritual) return sendError(res, 404, "Ritual not found");
 
     const temple = ritual.temple_id || null;
 
@@ -232,18 +196,14 @@ exports.getRitualPackages = async (req, res) => {
     const source = { ...req.query, ...req.body };
     const ritualId = getSourceValue(source, "ritual_id", "ritualId");
 
-    if (!ritualId) {
-      return sendError(res, 400, "ritual_id is required");
-    }
+    if (!ritualId) return sendError(res, 400, "ritual_id is required");
 
     const ritual = await Ritual.findOne({
       ...buildRitualLookup(ritualId),
       status: 1,
     }).lean();
 
-    if (!ritual) {
-      return sendError(res, 404, "Ritual not found");
-    }
+    if (!ritual) return sendError(res, 404, "Ritual not found");
 
     const packages = await RitualPackage.find({
       ritual_id: ritual._id,
@@ -255,7 +215,7 @@ exports.getRitualPackages = async (req, res) => {
     const formatted = packages.map((pkg) => ({
       id: Number(pkg.sql_id) || 0,
       ritual_id: Number(ritual.sql_id) || 0,
-      temple_id: Number(pkg.temple_id?.sql_id || 0) || 0,
+      temple_id: 0,
       name: String(pkg.name || ""),
       description: String(pkg.description || ""),
       devotees_count: Number(pkg.devotees_count || 1),
@@ -387,9 +347,7 @@ exports.verifyRitualBooking = async (req, res) => {
     }
 
     const booking = await RitualBooking.findOne({ razorpay_order_id });
-    if (!booking) {
-      return sendError(res, 404, "Booking not found");
-    }
+    if (!booking) return sendError(res, 404, "Booking not found");
 
     booking.razorpay_payment_id = razorpay_payment_id;
     booking.payment_status = 2;
