@@ -24,7 +24,7 @@ exports.getHomeData = async (req, res) => {
         };
 
         const formattedTemples = popularTemples.map(t => ({
-            id: t.sql_id || 0,
+            id: parseInt(t.sql_id) || 0,
             name: t.name || "",
             is_favorite: 0,
             image: formatImg(t.image),
