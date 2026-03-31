@@ -187,25 +187,38 @@ exports.getActiveMemberships = async (req, res) => {
  */
 exports.getMyMembershipCard = async (req, res) => {
     try {
-        const card = await PurchasedMemberCard.findOne({ 
-            user_id: req.user.id, 
-            payment_status: 2 // 2: Paid
-        }).sort({ created_at: -1 }).populate('membership_card_id');
+        // Fetch all active membership plans available for purchase
+        const cards = await Membership.find({ status: 1 }).lean();
 
-        if (!card) {
-            return res.status(404).json({ 
-                status: "false", 
-                success: false, 
-                message: "No active membership found" 
-            });
-        }
+        /**
+         * 🎯 Matches MemberShip class in member_ship_card.dart
+         * Note: price must be a String, visits/duration must be Int
+         */
+        const formattedCards = cards.map(card => ({
+            id: card.sql_id || 0,
+            name: card.name || "",
+            description: card.description || "",
+            visits: card.visits || 0,
+            price: String(card.price || "0"),
+            duration: card.duration || 1,
+            duration_type: card.duration_type || 1, // 1=Month, 2=Year
+            status: card.status || 1
+        }));
 
-        res.status(200).json({ 
+        res.status(200).json({
             status: "true",
-            success: true, 
-            data: card 
+            message: "Membership list fetched",
+            data: {
+                data: formattedCards, // List inside data.data
+                total_count: formattedCards.length,
+                is_next: false,
+                is_prev: false,
+                current_page: 1,
+                last_page: 1,
+                links: []
+            }
         });
     } catch (error) {
-        res.status(500).json({ status: "false", success: false, message: error.message });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
