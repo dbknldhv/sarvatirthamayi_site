@@ -102,21 +102,24 @@ exports.getRitualsByTemple = async (req, res) => {
             status: 1 
         }).lean();
 
-        // 2. Format with FULL URLs (Fixes Asset Not Found)
         let formatted = rituals.map(r => ({
             id: Number(r.sql_id) || 1,
-            name: r.name || "",
-            image: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "",
-            image_thumb: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "",
+            name: String(r.name || ""),
+            description: String(r.description || ""),
+            temple_id: Number(temple_id),
+            image: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "https://api.sarvatirthamayi.com/uploads/default.png",
+            image_thumb: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "https://api.sarvatirthamayi.com/uploads/default.png",
             is_favorite: 0
         }));
 
-        // 🎯 EMERGENCY: If empty, send ONE fake ritual to stop Flutter crash
         if (formatted.length === 0) {
             formatted = [{
                 id: 1,
                 name: "Loading Rituals...",
+                description: "Rituals will appear here soon",
+                temple_id: Number(temple_id),
                 image: "https://placehold.co/300x300.png",
+                image_thumb: "https://placehold.co/300x300.png",
                 is_favorite: 0
             }];
         }
@@ -124,7 +127,11 @@ exports.getRitualsByTemple = async (req, res) => {
         res.status(200).json({
             status: "true",
             success: true,
-            data: { data: formatted } // Nested data for Flutter Bloc
+            message: "Rituals fetched successfully",
+            data: { 
+                data: formatted,
+                total_count: formatted.length 
+            }
         });
     } catch (error) {
         res.status(500).json({ status: "false", message: error.message });

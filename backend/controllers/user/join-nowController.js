@@ -57,8 +57,8 @@ exports.getPublicTemples = async (req, res) => {
             name: t.name || "",
             sequence: parseInt(t.sequence) || 0,
             is_favorite: 0,
-            image: t.image || "",
-            image_thumb: t.image || ""
+            image: t.image ? `https://api.sarvatirthamayi.com/${t.image.replace(/\\/g, '/')}` : "",
+            image_thumb: t.image ? `https://api.sarvatirthamayi.com/${t.image.replace(/\\/g, '/')}` : ""
         }));
 
         return res.status(200).json({
@@ -88,12 +88,6 @@ exports.getPublicTemples = async (req, res) => {
         });
     }
 };
-
-/**
- * 3. Get Temple By ID (Detail View)
- * FIX: Matches TempleShowDetailModel.dart with nested Address
- */
-// backend/controllers/user/join-nowController.js
 
 exports.getPublicTempleById = async (req, res) => {
     try {
@@ -144,8 +138,8 @@ exports.getPublicTempleById = async (req, res) => {
             close_time: temple.close_time || "09:00 PM",
             is_favorite: 0,
             devotees_booked_count: temple.devotees_booked_count || 0,
-            image: temple.image || "",
-            image_thumb: temple.image || ""
+            image: temple.image ? `https://api.sarvatirthamayi.com/${temple.image.replace(/\\/g, '/')}` : "",
+            image_thumb: temple.image ? `https://api.sarvatirthamayi.com/${temple.image.replace(/\\/g, '/')}` : ""
         };
 
         res.status(200).json({
