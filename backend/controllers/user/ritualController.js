@@ -24,24 +24,19 @@ const getRazorpayInstance = () => {
     });
 };
 
-/**
- * --- HELPER: Secure Ritual Price Calculation ---
- * Now integrates both Membership (0.7%) and Voucher logic.
- */
+const formatImageUrl = (imgPath) => {
+    if (!imgPath) return "";
+    if (imgPath.startsWith('http')) return imgPath;
+    const baseUrl = "https://api.sarvatirthamayi.com/";
+    const cleanPath = imgPath.replace(/\\/g, '/');
+    return `${baseUrl}${cleanPath.startsWith('/') ? cleanPath.substring(1) : cleanPath}`;
+};
 
-
-// --- 1. DATA FETCHING ROUTES ---
-/**
- * --- HELPER: Secure Ritual Price Calculation ---
- * Fixed to search by sql_id to bridge Flutter (Number) and MongoDB (ObjectId)
- */
 const calculateRitualPrice = async (userId, packageSqlId, voucherCode = null) => {
-    // 🎯 THE FIX: Flutter sends the 'sql_id' (Number), so we use findOne
     const [pkg, user] = await Promise.all([
         RitualPackage.findOne({ sql_id: Number(packageSqlId) }),
         User.findById(userId)
     ]);
-
     if (!pkg) throw new Error(`Ritual package not found for SQL_ID: ${packageSqlId}`);
 
     let basePrice = pkg.price || 0;
@@ -49,13 +44,11 @@ const calculateRitualPrice = async (userId, packageSqlId, voucherCode = null) =>
     let discountType = "None";
     let voucherId = null;
 
-    // 1. Apply Membership Discount (0.7%)
     if (user?.status === 1 && user?.membership === "active") {
         finalPrice = basePrice * 0.993; 
         discountType = "Membership (0.7%)";
     }
 
-    // 2. Apply Voucher Discount
     if (voucherCode) {
         const voucherResult = await validateVoucher(voucherCode, userId, "ritual", finalPrice);
         finalPrice = voucherResult.finalAmount;
@@ -63,13 +56,7 @@ const calculateRitualPrice = async (userId, packageSqlId, voucherCode = null) =>
         discountType = discountType === "None" ? "Voucher" : `${discountType} + Voucher`;
     }
 
-    return { 
-        pkg, // 🎯 CRITICAL: Return the package document so the controller has the real ._id
-        basePrice, 
-        finalPrice: Number(finalPrice.toFixed(2)), 
-        discountType,
-        voucherId
-    };
+    return { pkg, basePrice, finalPrice: Number(finalPrice.toFixed(2)), discountType, voucherId };
 };
 /**
  * Fetch distinct ritual types for filtering/dropdowns
@@ -101,13 +88,44 @@ exports.getAllRituals = async (req, res) => {
 
 exports.getRitualsByTemple = async (req, res) => {
     try {
-        const rituals = await Ritual.find({ temple_id: req.params.templeId, status: 1 });
-        res.status(200).json({ success: true, data: rituals });
+        // Flutter sends {"temple_id": 32} in a POST body
+        const temple_id = req.body.temple_id || req.query.temple_id;
+
+        if (!temple_id) {
+            return res.status(200).json({ status: "true", success: true, data: { data: [] } });
+        }
+
+        const rituals = await Ritual.find({ 
+            $or: [
+                { temple_id: mongoose.isValidObjectId(temple_id) ? temple_id : null }, 
+                { temple_sql_id: Number(temple_id) }
+            ],
+            status: 1 
+        }).populate("temple_id");
+
+        const formatted = rituals.map(r => ({
+            id: Number(r.sql_id),
+            name: String(r.name || ""),
+            description: String(r.description || ""),
+            temple_id: Number(temple_id),
+            temple_name: String(r.temple_id?.name || ""),
+            image: formatImageUrl(r.image),
+            image_thumb: formatImageUrl(r.image),
+            devotees_booked_count: 0,
+            is_favorite: 0
+        }));
+
+        res.status(200).json({
+            status: "true",
+            success: true,
+            message: "Temples list fetch successfully",
+            data: { data: formatted } 
+        });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        console.error("🔥 Ritual List Error:", error);
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
-
 exports.getRitualDetailsWithPackages = async (req, res) => {
     try {
         const ritual = await Ritual.findById(req.params.ritualId).populate("temple_id");
@@ -132,8 +150,9 @@ exports.getRitualDetailsWithPackages = async (req, res) => {
  */
 exports.createRitualOrder = async (req, res) => {
     try {
-        const packageId = req.body.packageId || req.body.ritual_package_id;
-        const voucherCode = req.body.voucherCode || req.body.voucher_code;
+        const source = { ...req.body, ...req.query };
+        const packageId = source.packageId || source.ritual_package_id;
+        const voucherCode = source.voucherCode || source.voucher_code;
 
         if (!packageId) return res.status(400).json({ success: false, message: "packageId is required" });
 
@@ -153,70 +172,44 @@ exports.createRitualOrder = async (req, res) => {
             finalAmount: finalPrice 
         });
     } catch (error) {
-        console.error("Order Creation Error:", error.message);
-        res.status(500).json({ success: false, message: "Ritual or Package not found" });
+        res.status(500).json({ success: false, status: "false", message: error.message });
     }
-};
-/**
+};/**
  * 💳 VERIFY PAYMENT & FINALISE
  * Confirms payment and "burns" the voucher so it's one-time use.
  */
 
 exports.verifyRitualBooking = async (req, res) => {
     try {
-        // 1. LOG THE WHOLE BODY - Essential for debugging Hostinger logs
-        console.log("📦 RITUAL VERIFY BODY:", JSON.stringify(req.body, null, 2));
-
-        const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+        const source = { ...(req.body.bookingData || {}), ...req.body, ...req.query };
+        const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = source;
         
-        // 2. UNIVERSAL SOURCE: Merges potential nested objects with the root body
-        const source = { ...(req.body.bookingData || {}), ...req.body };
-        
-        // 3. EXTRACT WITH FALLBACKS: Supports camelCase (Postman) and snake_case (Flutter APK)
         const ritualSqlId = source.ritualId || source.ritual_id;
-        const packageSqlId = source.packageId || source.ritual_package_id || source.package_id;
+        const packageSqlId = source.packageId || source.ritual_package_id;
         const templeSqlId = source.templeId || source.temple_id;
 
-        // 🎯 THE SAFETY GUARD: Prevent NaN MongoDB crashes
-        if (!ritualSqlId || !packageSqlId || !templeSqlId) {
-            console.error("🛑 ID Mismatch! Hiding in Body:", { ritualSqlId, packageSqlId, templeSqlId });
-            return res.status(400).json({ 
-                success: false, 
-                status: "false",
-                message: "Missing Required IDs (Ritual, Package, or Temple)." 
-            });
+        if (!ritualSqlId || !packageSqlId || !razorpay_order_id) {
+            return res.status(400).json({ success: false, status: "false", message: "Missing IDs" });
         }
 
-        // 4. DATABASE LOOKUP: Find MongoDB ObjectIds using the SQL IDs (Numbers)
         const [ritualDoc, templeDoc] = await Promise.all([
             Ritual.findOne({ sql_id: Number(ritualSqlId) }),
             mongoose.model('Temple').findOne({ sql_id: Number(templeSqlId) })
         ]);
 
-        if (!ritualDoc || !templeDoc) {
-            return res.status(404).json({ 
-                success: false, 
-                status: "false", 
-                message: "Record not found in database for provided IDs." 
-            });
-        }
-
-        // 5. PRICE CALCULATION: Re-verify amount to prevent tampering
         const { pkg, finalPrice, basePrice, discountType, voucherId } = await calculateRitualPrice(
             req.user.id, 
             packageSqlId, 
             source.voucherCode || source.voucher_code
         );
 
-        // 6. RAZORPAY SIGNATURE VERIFICATION
         const shasum = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET);
         shasum.update(`${razorpay_order_id}|${razorpay_payment_id}`);
         
         if (shasum.digest("hex") !== razorpay_signature) {
-            return res.status(400).json({ success: false, status: "false", message: "Invalid Signature" });
+            return res.status(400).json({ status: "false", message: "Invalid Signature" });
         }
 
-        // 7. CREATE PERMANENT BOOKING
         const newBooking = new RitualBooking({
             sql_id: Math.floor(100000 + Math.random() * 900000),
             booking_id: `RIT-${Date.now()}`,
@@ -227,47 +220,24 @@ exports.verifyRitualBooking = async (req, res) => {
             date: new Date(source.bookingDate || source.date || Date.now()),
             devotees_name: source.devoteeName || source.devotees_name,
             whatsapp_number: source.whatsappNumber || source.whatsapp_number,
-            wish: source.specialWish || source.wish || "",
             original_amount: basePrice,
             paid_amount: finalPrice,
-            discount_type: discountType,
-            razorpay_order_id,
-            razorpay_payment_id,
-            payment_status: 2, // 2 = Paid
-            booking_status: 2, // 2 = Confirmed
+            payment_status: 2, 
+            booking_status: 2,
             payment_date: new Date()
         });
 
         await newBooking.save();
-
-        // 8. FULFILLMENT: Burn Voucher & Generate Receipt
         if (voucherId) await redeemVoucher(voucherId, req.user.id);
 
-        const populatedBooking = await RitualBooking.findById(newBooking._id)
-            .populate("ritual_id", "name")
-            .populate("temple_id", "name city_name");
-
-        const fileName = await pdfGenerator.generateRitualReceipt(populatedBooking);
-        newBooking.ticket_url = `/rituals/${fileName}`;
-        await newBooking.save();
-
-        // 9. RESPONSE: Matches Flutter model expectations
         res.status(200).json({
             success: true,
             status: "true",
             message: "Ritual Booked Successfully!",
-            data: { 
-                bookingId: newBooking.booking_id, 
-                receiptUrl: newBooking.ticket_url 
-            }
+            data: { bookingId: newBooking.booking_id }
         });
 
     } catch (error) {
-        console.error("🔥 Ritual Verify Critical Error:", error);
-        res.status(500).json({ 
-            success: false, 
-            status: "false", 
-            message: error.message 
-        });
+        res.status(500).json({ success: false, status: "false", message: error.message });
     }
 };

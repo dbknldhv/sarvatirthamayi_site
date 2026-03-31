@@ -13,33 +13,30 @@ const getRazorpayInstance = () => {
 
 exports.createTempleBookingOrder = async (req, res) => {
     try {
-        // 🎯 THE FIX: Accept either templeId (Postman) or temple_id (Flutter)
-        const templeId = req.body.templeId || req.body.temple_id;
-        const whatsAppNumber = req.body.whatsAppNumber || req.body.whatsapp_number; // Add this line
-        const devoteesName = req.body.devoteeName || req.body.devotees_name; // Fix name too
-        const { date, wish, paymentType } = req.body;
+        // 🎯 SMART SOURCE: Checks for data in body OR query params
+        const source = { ...(req.body.bookingData || {}), ...req.body, ...req.query };
+
+        const templeId = source.templeId || source.temple_id;
+        const whatsAppNumber = source.whatsAppNumber || source.whatsapp_number;
+        const devoteesName = source.devoteeName || source.devotees_name;
+        const { date, wish, paymentType } = source;
 
         // --- 1. SAFETY CHECK ---
         const numericTempleId = Number(templeId);
 
         if (!templeId || isNaN(numericTempleId)) {
-            // This log will now show you EXACTLY what the phone sent if it fails
-            console.error(`🛑 Received invalid ID. Body:`, req.body);
+            console.error(`🛑 Invalid ID. Received Body:`, req.body);
             return res.status(400).json({ 
                 status: "false", 
                 success: false, 
-                message: "Invalid Temple Selection. Please go back and try again." 
+                message: "Invalid Temple Selection." 
             });
         }
 
         // --- 2. DATABASE LOOKUP ---
         const temple = await Temple.findOne({ sql_id: numericTempleId });
         if (!temple) {
-            return res.status(404).json({ 
-                status: "false", 
-                success: false, 
-                message: "Temple details not found in our records." 
-            });
+            return res.status(404).json({ status: "false", success: false, message: "Temple not found." });
         }
 
         // --- 3. PRICE & RAZORPAY LOGIC ---
@@ -47,6 +44,7 @@ exports.createTempleBookingOrder = async (req, res) => {
         let orderId = `FREE_${Date.now()}`;
         const publicKey = process.env.RAZORPAY_KEY_ID;
 
+        // Only call Razorpay if amount > 0
         if (amountInPaise > 0) {
             const rzp = getRazorpayInstance();
             if (!rzp) return res.status(500).json({ status: "false", message: "Razorpay Configuration Error" });
@@ -71,8 +69,8 @@ exports.createTempleBookingOrder = async (req, res) => {
             original_amount: String(temple.visit_price || "0"),
             paid_amount: String(temple.visit_price || "0"),
             razorpay_order_id: orderId,
-            booking_status: 1, 
-            payment_status: 1, 
+            booking_status: amountInPaise > 0 ? 1 : 2, // Confirmed immediately if free
+            payment_status: amountInPaise > 0 ? 1 : 2, // Paid immediately if free
             payment_type: paymentType || 2 
         });
         
@@ -91,7 +89,7 @@ exports.createTempleBookingOrder = async (req, res) => {
                 whatsapp_number: String(newBooking.whatsapp_number || ""),
                 devotees_name: String(newBooking.devotees_name || ""),
                 wish: String(newBooking.wish || ""),
-                booking_status: 1,
+                booking_status: newBooking.booking_status,
                 offer_discount_amount: "0",
                 original_amount: String(temple.visit_price || "0"),
                 paid_amount: String(temple.visit_price || "0"),
@@ -100,7 +98,7 @@ exports.createTempleBookingOrder = async (req, res) => {
                     razorpay_order_id: String(orderId),
                     razorpay_payment_id: "",
                     razorpay_public_key: String(publicKey || ""),
-                    payment_status: 1,
+                    payment_status: newBooking.payment_status,
                     payment_type: 2,
                     payment_date: "" 
                 },
@@ -108,14 +106,13 @@ exports.createTempleBookingOrder = async (req, res) => {
                     id: Number(temple.sql_id),
                     name: String(temple.name || ""),
                     short_description: String(temple.short_description || ""),
-                    long_description: String(temple.long_description || ""),
                     visit_price: String(temple.visit_price || "0"),
                     image: String(temple.image || ""),
                     image_thumb: String(temple.image || ""),
                     address: {
                         full_address: String(temple.address_line1 || ""),
-                        city: String(temple.city_name || temple.city || ""),
-                        state: String(temple.state_name || temple.state || "")
+                        city: String(temple.city_name || ""),
+                        state: String(temple.state_name || "")
                     }
                 }
             }
@@ -126,6 +123,7 @@ exports.createTempleBookingOrder = async (req, res) => {
         return res.status(500).json({ status: "false", message: error.message });
     }
 };
+
 exports.verifyAndConfirmBooking = async (req, res) => {
     try {
         const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
@@ -155,31 +153,11 @@ exports.verifyAndConfirmBooking = async (req, res) => {
             message: "Razorpay payment verified successfully.",
             data: {
                 id: Number(booking.sql_id),
-                user_id: 0,
-                temple_id: Number(booking.temple_id?.sql_id || 0),
-                date: booking.date.toISOString(),
-                whatsapp_number: String(booking.whatsapp_number || ""),
-                devotees_name: String(booking.devotees_name || ""),
-                wish: String(booking.wish || ""),
                 booking_status: 2,
-                offer_discount_amount: "0",
-                original_amount: String(booking.original_amount || "0"),
-                paid_amount: String(booking.paid_amount || "0"),
-                created_at: booking.createdAt.toISOString(),
                 payment: {
                     razorpay_order_id: String(booking.razorpay_order_id),
                     razorpay_payment_id: String(booking.razorpay_payment_id),
-                    razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
-                    payment_status: 2,
-                    payment_type: 2,
-                    payment_date: booking.payment_date.toISOString()
-                },
-                temple: {
-                    id: Number(booking.temple_id?.sql_id || 0),
-                    name: String(booking.temple_id?.name || ""),
-                    image: String(booking.temple_id?.image || ""),
-                    visit_price: String(booking.temple_id?.visit_price || "0"),
-                    address: { full_address: String(booking.temple_id?.full_address || "") }
+                    payment_status: 2
                 }
             }
         });
@@ -219,14 +197,13 @@ exports.getMyBookings = async (req, res) => {
 
         res.status(200).json({
             status: "true",
+            success: true,
             message: "Temple booking details fetched successfully.",
             data: {
                 data: formattedBookings,
                 total_count: formattedBookings.length,
                 is_next: false,
-                is_prev: false,
-                current_page: 1,
-                total_pages: 1
+                is_prev: false
             }
         });
     } catch (error) {
