@@ -103,24 +103,28 @@ exports.getRitualsByTemple = async (req, res) => {
         }).lean();
 
         let formatted = rituals.map(r => ({
-            id: Number(r.sql_id) || 1,
+            id: Number(r.sql_id) || 0,
             name: String(r.name || ""),
             description: String(r.description || ""),
             temple_id: Number(temple_id),
-            image: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "https://api.sarvatirthamayi.com/uploads/default.png",
-            image_thumb: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "https://api.sarvatirthamayi.com/uploads/default.png",
-            is_favorite: 0
+            image: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "",
+            image_thumb: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "",
+            is_favorite: 0,
+            price: String(r.price || "0"), // 🎯 CRITICAL: Flutter model expects String
+            duration: String(r.duration || "0")
         }));
 
         if (formatted.length === 0) {
             formatted = [{
                 id: 1,
-                name: "Loading Rituals...",
-                description: "Rituals will appear here soon",
+                name: "No Rituals",
+                description: "Coming Soon",
                 temple_id: Number(temple_id),
-                image: "https://placehold.co/300x300.png",
-                image_thumb: "https://placehold.co/300x300.png",
-                is_favorite: 0
+                image: "",
+                image_thumb: "",
+                is_favorite: 0,
+                price: "0",
+                duration: "0"
             }];
         }
 
@@ -128,9 +132,20 @@ exports.getRitualsByTemple = async (req, res) => {
             status: "true",
             success: true,
             message: "Rituals fetched successfully",
-            data: { 
+            data: {
+                current_page: 1,
                 data: formatted,
-                total_count: formatted.length 
+                first_page_url: `${baseUrl}api/v1/ritual/index?page=1`,
+                from: 1,
+                last_page: 1,
+                last_page_url: `${baseUrl}api/v1/ritual/index?page=1`,
+                links: [],
+                next_page_url: null, // 🎯 Prevents 'nextPageUrl' null check crash
+                path: `${baseUrl}api/v1/ritual/index`,
+                per_page: 15,
+                prev_page_url: null,
+                to: formatted.length,
+                total: formatted.length
             }
         });
     } catch (error) {
