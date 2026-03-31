@@ -4,8 +4,7 @@ const crypto = require("crypto");
 
 const Ritual = require("../../models/Ritual");
 const RitualPackage = require("../../models/RitualPackage");
-const RitualBooking =
-  mongoose.models.RitualBooking || require("../../models/RitualBooking");
+const RitualBooking = mongoose.models.RitualBooking || require("../../models/RitualBooking");
 const Temple = mongoose.models.Temple || require("../../models/Temple");
 const formatImageUrl = require("../../utils/imageUrl");
 
@@ -307,20 +306,36 @@ exports.createRitualOrder = async (req, res) => {
       created_at: new Date(),
       updated_at: new Date(),
     });
+  return res.status(200).json({
+  status: "true",
+  success: true,
+  message: FLUTTER_MESSAGES.ritualBookingSuccess,
+  data: {
+    id: Number(booking.sql_id || 0),
+    user_id: 0,
+    temple_id: Number(templeDoc.sql_id || 0),
+    ritual_id: Number(ritualDoc.sql_id || 0),
+    ritual_package_id: Number(packageDoc.sql_id || 0),
+    date: booking.date ? booking.date.toISOString() : new Date().toISOString(),
+    whatsapp_number: String(booking.whatsapp_number || ""),
+    devotees_name: String(booking.devotees_name || ""),
+    wish: String(booking.wish || ""),
+    booking_status: Number(booking.booking_status || 1),
+    offer_discount_amount: String(booking.offer_discount_amount || 0),
+    original_amount: String(booking.original_amount || 0),
+    paid_amount: String(booking.paid_amount || 0),
+    offer_id: booking.offer_id ?? null,
+    payment: {
+      razorpay_order_id: String(order.id || ""),
+      razorpay_payment_id: "",
+      razorpay_public_key: String(process.env.RAZORPAY_KEY_ID || ""),
+      payment_status: Number(booking.payment_status || 1),
+      payment_type: Number(booking.payment_type || 2),
+      payment_date: ""
+    }
+  }
+});
 
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: FLUTTER_MESSAGES.ritualBookingSuccess,
-      data: {
-        id: booking.sql_id,
-        booking_id: booking.booking_id,
-        razorpay_order_id: order.id,
-        razorpay_key: process.env.RAZORPAY_KEY_ID,
-        amount: order.amount,
-        currency: order.currency,
-      },
-    });
   } catch (error) {
     return sendError(res, 500, error.message);
   }
