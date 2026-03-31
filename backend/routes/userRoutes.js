@@ -35,8 +35,10 @@ router.get("/temples/:id", joinNowController.getPublicTempleById);
 router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple);
 
 
-router.post("/donation/index", protect, donationController.getDonationsByTemple);
+router.post("/donation/index", protect, donationController.getDonations);
 router.post("/donation/show", protect, donationController.getDonationById);
+router.post("/donation/update", protect, upload.single('image'), donationController.updateDonation);
+
 
 // --- 🎯 FLUTTER ALIGNMENT: Ritual Public Routes ---
 //router.post("/ritual/index", ritualController.getAllRituals); 
