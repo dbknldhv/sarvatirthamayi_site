@@ -1,6 +1,5 @@
-const Temple = require('../models/Temple');
-const PurchasedMemberCard = require('../models/PurchasedMemberCard');
-
+const Temple = require('../../models/Temple');
+const PurchasedMemberCard = require('../../models/PurchasedMemberCard');
 /**
  * GET /api/v1/home
  * Fetches dashboard data: Active User Membership and Temple Lists

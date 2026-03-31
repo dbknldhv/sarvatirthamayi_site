@@ -128,20 +128,27 @@ exports.getRitualsByTemple = async (req, res) => {
 };
 exports.getRitualDetailsWithPackages = async (req, res) => {
     try {
-        const ritual = await Ritual.findById(req.params.ritualId).populate("temple_id");
+        const { ritual_id } = req.body; 
+        const ritual = await Ritual.findOne({ 
+            $or: [{ _id: ritual_id }, { sql_id: Number(ritual_id) }] 
+        }).populate("temple_id");
+
         if (!ritual) return res.status(404).json({ success: false, message: "Ritual not found" });
 
-        const packages = await RitualPackage.find({ ritual_id: req.params.ritualId, status: 1 });
-        
-        res.status(200).json({ 
-            success: true, 
-            data: { ...ritual._doc, packages } 
+        const packages = await RitualPackage.find({ 
+            ritual_id: ritual._id, 
+            status: 1 
+        });
+
+        res.status(200).json({
+            status: "true",
+            success: true,
+            data: { ...ritual._doc, packages }
         });
     } catch (error) {
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ status: "false", message: error.message });
     }
 };
-
 // --- 2. SECURE PAYMENT & BOOKING LOGIC ---
 
 /**

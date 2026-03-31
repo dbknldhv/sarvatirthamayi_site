@@ -229,6 +229,24 @@ exports.loginUser = async (req, res) => {
     }
 };
 
+
+// Add this to your userController.js
+exports.logoutUser = async (req, res) => {
+    try {
+        res.status(200).json({
+            status: "true",
+            success: true,
+            message: "Logged out successfully",
+            data: []
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            status: "false", 
+            success: false, 
+            message: error.message 
+        });
+    }
+};
 // --- 6. PROFILE MANAGEMENT ---
 // backend/controllers/user/userController.js
 exports.getProfile = async (req, res) => {

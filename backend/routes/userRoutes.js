@@ -9,6 +9,7 @@ const cardController = require("../controllers/user/membershipcardController");
 const templeBookingController = require("../controllers/user/templeBookingController");
 const ritualController = require("../controllers/user/ritualController");
 const userVoucherController = require("../controllers/user/userVoucherController");
+const homeController = require("../controllers/user/homeController"); // Add this
 // const donationController = require("../controllers/user/donationController"); // Uncomment when ready
 
 // --- 2. Import Middleware ---
@@ -21,6 +22,7 @@ router.get("/test-route", (req, res) => {
 });
 
 // --- 4. Public Data Routes ---
+router.get("/home", protect, homeController.getHomeData); // Matches Flutter home call
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/states", joinNowController.getPublicStates);
 
@@ -32,7 +34,8 @@ router.get("/temples/:id", joinNowController.getPublicTempleById);
 router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple);
 
 // --- 🎯 FLUTTER ALIGNMENT: Ritual Public Routes ---
-router.get("/ritual/index", ritualController.getAllRituals); 
+//router.post("/ritual/index", ritualController.getAllRituals); 
+router.post("/ritual/index", ritualController.getRitualsByTemple);
 router.post("/ritual/show", ritualController.getRitualDetailsWithPackages); 
 router.get("/ritual/packages", ritualController.getRitualDetailsWithPackages); // Extra alias for packages
 
@@ -41,6 +44,7 @@ router.post("/signup", userController.signupUser);
 router.post("/verify-otp", userController.verifyOtp);
 router.post("/resend-otp", userController.resendOtp);
 router.post("/login", userController.loginUser);
+router.post("/logout", protect, userController.logoutUser);
 router.post('/forgot-password', userController.forgotPassword);
 router.post('/reset-password', userController.resetPassword);
 
@@ -51,6 +55,7 @@ router.get("/auth/check-auth", protect, (req, res) => {
 
 router.get('/profile', protect, userController.getProfile);
 router.post('/profile', protect, upload.fields([{ name: 'profile_picture', maxCount: 1 }]), userController.updateProfile);
+
 router.put('/update-profile', protect, upload.fields([
     { name: 'profile_picture', maxCount: 1 },
     { name: 'bannerImage', maxCount: 1 }
