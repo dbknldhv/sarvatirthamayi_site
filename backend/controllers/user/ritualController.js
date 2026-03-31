@@ -4,81 +4,164 @@ const crypto = require("crypto");
 
 const Ritual = require("../../models/Ritual");
 const RitualPackage = require("../../models/RitualPackage");
-const RitualBooking = mongoose.models.RitualBooking || require("../../models/RitualBooking");
+const RitualBooking =
+  mongoose.models.RitualBooking || require("../../models/RitualBooking");
 const Temple = mongoose.models.Temple || require("../../models/Temple");
 
-const getRazorpayInstance = () => {
-  return new Razorpay({
+const API_BASE_URL = "https://api.sarvatirthamayi.com/";
+
+// IMPORTANT:
+// Replace these values with the EXACT strings used in Flutter Constants.
+// The current values are placeholders based on your current backend.
+const FLUTTER_MESSAGES = {
+  ritualListSuccess: process.env.FLUTTER_RITUAL_LIST_SUCCESS || "Rituals list fetched successfully",
+  ritualShowSuccess: process.env.FLUTTER_RITUAL_SHOW_SUCCESS || "Ritual  fetched successfully",
+  ritualPackageSuccess: process.env.FLUTTER_RITUAL_PACKAGE_SUCCESS || "Ritual packages fetched successfully",
+  ritualBookingSuccess: process.env.FLUTTER_RITUAL_BOOKING_SUCCESS || "Ritual booking  successfully",
+  ritualVerifySuccess: process.env.FLUTTER_RITUAL_VERIFY_SUCCESS || "Ritual booking created successfully",
+  ritualBookingDetailsSuccess:
+    process.env.FLUTTER_RITUAL_BOOKING_DETAILS_SUCCESS || "Ritual booking details fetched successfully.",
+};
+
+const getRazorpayInstance = () =>
+  new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID,
     key_secret: process.env.RAZORPAY_KEY_SECRET,
   });
+
+const isValidObjectId = (value) => mongoose.isValidObjectId(value);
+
+const toNumberOrNull = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  return Number.isNaN(n) ? null : n;
 };
+
+const getSourceValue = (source, ...keys) => {
+  for (const key of keys) {
+    if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
+      return source[key];
+    }
+  }
+  return null;
+};
+
+const sendError = (res, statusCode, message) =>
+  res.status(statusCode).json({
+    status: "false",
+    success: false,
+    message,
+  });
 
 const formatImageUrl = (imgPath) => {
   if (!imgPath) return "";
-  if (imgPath.startsWith("http")) return imgPath;
-  const baseUrl = "https://api.sarvatirthamayi.com/";
-  const cleanPath = imgPath.replace(/\\/g, "/");
-  return `${baseUrl}${cleanPath.startsWith("/") ? cleanPath.substring(1) : cleanPath}`;
+
+  const raw = String(imgPath).trim().replace(/\\/g, "/");
+
+  // Already absolute URL -> return as-is
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  // localhost URL accidentally stored in DB -> convert to production uploads path
+  if (raw.startsWith("localhost:5000/")) {
+    return `https://${raw}`;
+  }
+
+  if (raw.startsWith("/")) {
+    return `${API_BASE_URL}${raw.slice(1)}`;
+  }
+
+  return `${API_BASE_URL}${raw}`;
+};
+
+const buildTempleAddress = (temple) => {
+  if (!temple || !temple.address) return null;
+
+  return {
+    full_address: temple.address.full_address || "",
+    address_line1: temple.address.address_line1 || "",
+    address_line2: temple.address.address_line2 || "",
+    landmark: temple.address.landmark || "",
+    city: temple.address.city || "",
+    state: temple.address.state || "",
+    pincode: temple.address.pincode || "",
+    country: temple.address.country || "",
+    latitude: temple.address.latitude || "",
+    longitude: temple.address.longitude || "",
+    address_url: temple.address.address_url || "",
+  };
+};
+
+const buildTempleLookup = (templeId) => {
+  const numericTempleId = toNumberOrNull(templeId);
+
+  return {
+    $or: [
+      ...(numericTempleId !== null ? [{ sql_id: numericTempleId }] : []),
+      ...(isValidObjectId(templeId) ? [{ _id: templeId }] : []),
+    ],
+  };
+};
+
+const buildRitualLookup = (ritualId) => {
+  const numericRitualId = toNumberOrNull(ritualId);
+
+  return {
+    $or: [
+      ...(numericRitualId !== null ? [{ sql_id: numericRitualId }] : []),
+      ...(isValidObjectId(ritualId) ? [{ _id: ritualId }] : []),
+    ],
+  };
+};
+
+const buildPackageLookup = (packageId) => {
+  const numericPackageId = toNumberOrNull(packageId);
+
+  return {
+    $or: [
+      ...(numericPackageId !== null ? [{ sql_id: numericPackageId }] : []),
+      ...(isValidObjectId(packageId) ? [{ _id: packageId }] : []),
+    ],
+  };
 };
 
 exports.getRitualsByTemple = async (req, res) => {
   try {
-    const templeId = req.body.temple_id || req.body.templeId || req.query.temple_id || req.query.templeId;
+    const source = { ...req.query, ...req.body };
+    const templeId = getSourceValue(source, "temple_id", "templeId");
 
     if (!templeId) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "temple_id is required",
-      });
+      return sendError(res, 400, "temple_id is required");
     }
 
-    const temple = await Temple.findOne({
-      $or: [
-        { sql_id: Number(templeId) },
-        { _id: mongoose.isValidObjectId(templeId) ? templeId : null },
-      ],
-    }).lean();
+    const temple = await Temple.findOne(buildTempleLookup(templeId)).lean();
+    if (!temple) {
+      return sendError(res, 404, "Temple not found");
+    }
 
     const rituals = await Ritual.find({
-      temple_id: temple?._id,
+      temple_id: temple._id,
       status: 1,
     })
       .sort({ sequence: 1, created_at: -1 })
       .lean();
 
-    const formatted = rituals.map((r) => ({
-      id: Number(r.sql_id) || 0,
-      name: String(r.name || ""),
-      description: String(r.description || ""),
-      temple_id: Number(temple?.sql_id || templeId || 0),
-      temple_name: String(temple?.name || ""),
-      image: formatImageUrl(r.image),
-      image_thumb: formatImageUrl(r.image),
+    const formatted = rituals.map((ritual) => ({
+      id: Number(ritual.sql_id) || 0,
+      name: String(ritual.name || ""),
+      description: String(ritual.description || ""),
+      temple_id: Number(temple.sql_id) || 0,
+      temple_name: String(temple.name || ""),
+      image: formatImageUrl(ritual.image),
+      image_thumb: formatImageUrl(ritual.image),
       devotees_booked_count: 0,
       is_favorite: 0,
-      address: temple?.address
-        ? {
-            full_address: temple.address.full_address || "",
-            address_line1: temple.address.address_line1 || "",
-            address_line2: temple.address.address_line2 || "",
-            landmark: temple.address.landmark || "",
-            city: temple.address.city || "",
-            state: temple.address.state || "",
-            pincode: temple.address.pincode || "",
-            country: temple.address.country || "",
-            latitude: temple.address.latitude || "",
-            longitude: temple.address.longitude || "",
-            address_url: temple.address.address_url || "",
-          }
-        : null,
+      address: buildTempleAddress(temple),
     }));
 
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "Rituals fetched successfully",
+      message: FLUTTER_MESSAGES.ritualListSuccess,
       data: {
         data: formatted,
         total_count: formatted.length,
@@ -97,106 +180,82 @@ exports.getRitualsByTemple = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, 500, error.message);
   }
 };
 
 exports.getRitualShow = async (req, res) => {
   try {
-    const ritualId = req.body.ritual_id || req.body.ritualId || req.query.ritual_id || req.query.ritualId;
-    const templeId = req.body.temple_id || req.body.templeId || req.query.temple_id || req.query.templeId;
+    const source = { ...req.query, ...req.body };
+    const ritualId = getSourceValue(source, "ritual_id", "ritualId");
+    const templeId = getSourceValue(source, "temple_id", "templeId");
+
+    if (!ritualId) {
+      return sendError(res, 400, "ritual_id is required");
+    }
 
     const ritual = await Ritual.findOne({
-      $or: [
-        { sql_id: Number(ritualId) },
-        { _id: mongoose.isValidObjectId(ritualId) ? ritualId : null },
-      ],
+      ...buildRitualLookup(ritualId),
       status: 1,
     }).populate("temple_id");
 
     if (!ritual) {
-      return res.status(404).json({
-        status: "false",
-        success: false,
-        message: "Ritual not found",
-      });
+      return sendError(res, 404, "Ritual not found");
     }
+
+    const temple = ritual.temple_id || null;
 
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "Ritual details fetched successfully",
+      message: FLUTTER_MESSAGES.ritualShowSuccess,
       data: {
         id: Number(ritual.sql_id) || 0,
-        temple_id: Number(ritual.temple_id?.sql_id || templeId || 0),
-        temple_name: String(ritual.temple_id?.name || ""),
+        temple_id: Number(temple?.sql_id || toNumberOrNull(templeId) || 0),
+        temple_name: String(temple?.name || ""),
         name: String(ritual.name || ""),
         description: String(ritual.description || ""),
         image: formatImageUrl(ritual.image),
         image_thumb: formatImageUrl(ritual.image),
         devotees_booked_count: 0,
         is_favorite: 0,
-        address: ritual.temple_id?.address
-          ? {
-              full_address: ritual.temple_id.address.full_address || "",
-              address_line1: ritual.temple_id.address.address_line1 || "",
-              address_line2: ritual.temple_id.address.address_line2 || "",
-              landmark: ritual.temple_id.address.landmark || "",
-              city: ritual.temple_id.address.city || "",
-              state: ritual.temple_id.address.state || "",
-              pincode: ritual.temple_id.address.pincode || "",
-              country: ritual.temple_id.address.country || "",
-              latitude: ritual.temple_id.address.latitude || "",
-              longitude: ritual.temple_id.address.longitude || "",
-              address_url: ritual.temple_id.address.address_url || "",
-            }
-          : null,
+        address: buildTempleAddress(temple),
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, 500, error.message);
   }
 };
 
 exports.getRitualPackages = async (req, res) => {
   try {
-    const ritualId = req.query.ritual_id || req.query.ritualId || req.body.ritual_id || req.body.ritualId;
+    const source = { ...req.query, ...req.body };
+    const ritualId = getSourceValue(source, "ritual_id", "ritualId");
+
+    if (!ritualId) {
+      return sendError(res, 400, "ritual_id is required");
+    }
 
     const ritual = await Ritual.findOne({
-      $or: [
-        { sql_id: Number(ritualId) },
-        { _id: mongoose.isValidObjectId(ritualId) ? ritualId : null },
-      ],
+      ...buildRitualLookup(ritualId),
       status: 1,
-    });
+    }).lean();
 
     if (!ritual) {
-      return res.status(404).json({
-        status: "false",
-        success: false,
-        message: "Ritual not found",
-      });
+      return sendError(res, 404, "Ritual not found");
     }
 
     const packages = await RitualPackage.find({
       ritual_id: ritual._id,
       status: 1,
     })
-      .sort({ created_at: 1 })
+      .sort({ created_at: 1, _id: 1 })
       .lean();
 
     const formatted = packages.map((pkg) => ({
       id: Number(pkg.sql_id) || 0,
       ritual_id: Number(ritual.sql_id) || 0,
-      temple_id: 0,
+      temple_id: Number(pkg.temple_id?.sql_id || 0) || 0,
       name: String(pkg.name || ""),
       description: String(pkg.description || ""),
       devotees_count: Number(pkg.devotees_count || 1),
@@ -207,76 +266,60 @@ exports.getRitualPackages = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "Ritual packages fetched successfully",
+      message: FLUTTER_MESSAGES.ritualPackageSuccess,
       data: {
         data: formatted,
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, 500, error.message);
   }
 };
 
 exports.createRitualOrder = async (req, res) => {
   try {
-    const source = { ...req.body, ...req.query };
+    const source = { ...req.query, ...req.body };
 
-    const templeId = source.templeId || source.temple_id;
-    const ritualId = source.ritualId || source.ritual_id;
-    const ritualPackageId = source.ritualPackageId || source.ritual_package_id;
-    const date = source.date;
-    const whatsAppNumber = source.whatsAppNumber || source.whatsapp_number;
-    const devoteeName = source.devoteeName || source.devotees_name;
-    const paymentType = Number(source.paymentType || 2);
-    const transactionId = source.transactionId || "";
-    const wish = source.wish || "";
-    const offerId = source.offerId || null;
+    const templeId = getSourceValue(source, "temple_id", "templeId");
+    const ritualId = getSourceValue(source, "ritual_id", "ritualId");
+    const ritualPackageId = getSourceValue(source, "ritual_package_id", "ritualPackageId");
+    const date = getSourceValue(source, "date");
+    const whatsAppNumber = getSourceValue(source, "whatsAppNumber", "whatsapp_number");
+    const devoteeName = getSourceValue(source, "devoteeName", "devotees_name");
+    const wish = getSourceValue(source, "wish") || "";
+    const offerId = getSourceValue(source, "offerId", "offer_id");
+    const paymentType = toNumberOrNull(getSourceValue(source, "paymentType", "payment_type")) || 2;
 
     if (!templeId || !ritualId || !ritualPackageId || !date || !whatsAppNumber || !devoteeName) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Required booking fields are missing",
-      });
+      return sendError(res, 400, "Required booking fields are missing");
     }
 
-    const [templeDoc, ritualDoc, pkg] = await Promise.all([
-      Temple.findOne({
-        $or: [
-          { sql_id: Number(templeId) },
-          { _id: mongoose.isValidObjectId(templeId) ? templeId : null },
-        ],
-      }),
-      Ritual.findOne({
-        $or: [
-          { sql_id: Number(ritualId) },
-          { _id: mongoose.isValidObjectId(ritualId) ? ritualId : null },
-        ],
-      }),
-      RitualPackage.findOne({
-        $or: [
-          { sql_id: Number(ritualPackageId) },
-          { _id: mongoose.isValidObjectId(ritualPackageId) ? ritualPackageId : null },
-        ],
-      }),
+    const [templeDoc, ritualDoc, packageDoc] = await Promise.all([
+      Temple.findOne(buildTempleLookup(templeId)),
+      Ritual.findOne(buildRitualLookup(ritualId)),
+      RitualPackage.findOne(buildPackageLookup(ritualPackageId)),
     ]);
 
-    if (!templeDoc || !ritualDoc || !pkg) {
-      return res.status(404).json({
-        status: "false",
-        success: false,
-        message: "Temple, ritual, or package not found",
-      });
+    if (!templeDoc) return sendError(res, 404, "Temple not found");
+    if (!ritualDoc) return sendError(res, 404, "Ritual not found");
+    if (!packageDoc) return sendError(res, 404, "Ritual package not found");
+
+    if (String(ritualDoc.temple_id) !== String(templeDoc._id)) {
+      return sendError(res, 400, "Ritual does not belong to the selected temple");
     }
 
-    const amount = Number(pkg.price || 0);
-    const rzp = getRazorpayInstance();
+    if (String(packageDoc.ritual_id) !== String(ritualDoc._id)) {
+      return sendError(res, 400, "Package does not belong to the selected ritual");
+    }
 
-    const order = await rzp.orders.create({
+    if (String(packageDoc.temple_id) !== String(templeDoc._id)) {
+      return sendError(res, 400, "Package does not belong to the selected temple");
+    }
+
+    const amount = Number(packageDoc.price || 0);
+    const razorpay = getRazorpayInstance();
+
+    const order = await razorpay.orders.create({
       amount: Math.round(amount * 100),
       currency: "INR",
       receipt: `rit_${Date.now()}`,
@@ -288,26 +331,27 @@ exports.createRitualOrder = async (req, res) => {
       user_id: req.user.id,
       temple_id: templeDoc._id,
       ritual_id: ritualDoc._id,
-      ritual_package_id: pkg._id,
+      ritual_package_id: packageDoc._id,
       date: new Date(date),
-      whatsapp_number: whatsAppNumber,
-      devotees_name: devoteeName,
-      wish,
+      whatsapp_number: String(whatsAppNumber),
+      devotees_name: String(devoteeName),
+      wish: String(wish),
       booking_status: 1,
       payment_type: paymentType,
       payment_status: 1,
       razorpay_order_id: order.id,
-      transaction_id: transactionId,
-      offer_id: offerId,
+      offer_id: offerId ? Number(offerId) : null,
       offer_discount_amount: 0,
       original_amount: amount,
       paid_amount: amount,
+      created_at: new Date(),
+      updated_at: new Date(),
     });
 
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "Ritual booking created successfully",
+      message: FLUTTER_MESSAGES.ritualBookingSuccess,
       data: {
         id: booking.sql_id,
         booking_id: booking.booking_id,
@@ -318,50 +362,33 @@ exports.createRitualOrder = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, 500, error.message);
   }
 };
 
 exports.verifyRitualBooking = async (req, res) => {
   try {
-    const source = { ...req.body, ...req.query };
+    const source = { ...req.query, ...req.body };
 
-    const razorpay_order_id = source.razorPayOrderId || source.razorpay_order_id;
-    const razorpay_payment_id = source.razorPayPaymentId || source.razorpay_payment_id;
-    const razorpay_signature = source.razorPaySignature || source.razorpay_signature;
+    const razorpay_order_id = getSourceValue(source, "razorPayOrderId", "razorpay_order_id");
+    const razorpay_payment_id = getSourceValue(source, "razorPayPaymentId", "razorpay_payment_id");
+    const razorpay_signature = getSourceValue(source, "razorPaySignature", "razorpay_signature");
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({
-        success: false,
-        status: "false",
-        message: "Missing payment verification fields",
-      });
+      return sendError(res, 400, "Missing payment verification fields");
     }
 
-    const shasum = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET);
-    shasum.update(`${razorpay_order_id}|${razorpay_payment_id}`);
-    const generatedSignature = shasum.digest("hex");
+    const hmac = crypto.createHmac("sha256", process.env.RAZORPAY_KEY_SECRET);
+    hmac.update(`${razorpay_order_id}|${razorpay_payment_id}`);
+    const generatedSignature = hmac.digest("hex");
 
     if (generatedSignature !== razorpay_signature) {
-      return res.status(400).json({
-        success: false,
-        status: "false",
-        message: "Invalid Signature",
-      });
+      return sendError(res, 400, "Invalid Signature");
     }
 
     const booking = await RitualBooking.findOne({ razorpay_order_id });
-
     if (!booking) {
-      return res.status(404).json({
-        success: false,
-        status: "false",
-        message: "Booking not found",
-      });
+      return sendError(res, 404, "Booking not found");
     }
 
     booking.razorpay_payment_id = razorpay_payment_id;
@@ -373,9 +400,9 @@ exports.verifyRitualBooking = async (req, res) => {
     await booking.save();
 
     return res.status(200).json({
-      success: true,
       status: "true",
-      message: "Ritual booking verified successfully",
+      success: true,
+      message: FLUTTER_MESSAGES.ritualVerifySuccess,
       data: {
         booking_id: booking.booking_id,
         razorpay_order_id,
@@ -383,56 +410,52 @@ exports.verifyRitualBooking = async (req, res) => {
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      status: "false",
-      message: error.message,
-    });
+    return sendError(res, 500, error.message);
   }
 };
 
 exports.getMyRitualBookings = async (req, res) => {
   try {
     const bookings = await RitualBooking.find({ user_id: req.user.id })
-      .populate("temple_id", "name image")
+      .populate("temple_id", "name image sql_id")
       .populate("ritual_id", "name image sql_id")
       .populate("ritual_package_id", "name price sql_id")
-      .sort({ created_at: -1 })
+      .sort({ created_at: -1, _id: -1 })
       .lean();
 
-    const formatted = bookings.map((b) => ({
-      id: Number(b.sql_id) || 0,
-      booking_id: b.booking_id || "",
-      date: b.date,
-      whatsapp_number: b.whatsapp_number || "",
-      devotees_name: b.devotees_name || "",
-      wish: b.wish || "",
-      booking_status: b.booking_status || 1,
-      payment_status: b.payment_status || 1,
-      original_amount: String(b.original_amount || 0),
-      paid_amount: String(b.paid_amount || 0),
-      created_at: b.created_at,
-      temple: b.temple_id
+    const formatted = bookings.map((booking) => ({
+      id: Number(booking.sql_id) || 0,
+      booking_id: booking.booking_id || "",
+      date: booking.date,
+      whatsapp_number: booking.whatsapp_number || "",
+      devotees_name: booking.devotees_name || "",
+      wish: booking.wish || "",
+      booking_status: booking.booking_status || 1,
+      payment_status: booking.payment_status || 1,
+      original_amount: String(booking.original_amount || 0),
+      paid_amount: String(booking.paid_amount || 0),
+      created_at: booking.created_at,
+      temple: booking.temple_id
         ? {
-            id: Number(b.temple_id.sql_id || 0),
-            name: b.temple_id.name || "",
-            image: formatImageUrl(b.temple_id.image || ""),
-            image_thumb: formatImageUrl(b.temple_id.image || ""),
+            id: Number(booking.temple_id.sql_id || 0),
+            name: booking.temple_id.name || "",
+            image: formatImageUrl(booking.temple_id.image || ""),
+            image_thumb: formatImageUrl(booking.temple_id.image || ""),
           }
         : null,
-      ritual: b.ritual_id
+      ritual: booking.ritual_id
         ? {
-            id: Number(b.ritual_id.sql_id || 0),
-            name: b.ritual_id.name || "",
-            image: formatImageUrl(b.ritual_id.image || ""),
-            image_thumb: formatImageUrl(b.ritual_id.image || ""),
+            id: Number(booking.ritual_id.sql_id || 0),
+            name: booking.ritual_id.name || "",
+            image: formatImageUrl(booking.ritual_id.image || ""),
+            image_thumb: formatImageUrl(booking.ritual_id.image || ""),
           }
         : null,
-      ritual_package: b.ritual_package_id
+      ritual_package: booking.ritual_package_id
         ? {
-            id: Number(b.ritual_package_id.sql_id || 0),
-            name: b.ritual_package_id.name || "",
-            price: String(b.ritual_package_id.price || 0),
+            id: Number(booking.ritual_package_id.sql_id || 0),
+            name: booking.ritual_package_id.name || "",
+            price: String(booking.ritual_package_id.price || 0),
           }
         : null,
     }));
@@ -440,16 +463,12 @@ exports.getMyRitualBookings = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "Ritual booking details fetched successfully.",
+      message: FLUTTER_MESSAGES.ritualBookingDetailsSuccess,
       data: {
         data: formatted,
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
+    return sendError(res, 500, error.message);
   }
 };
