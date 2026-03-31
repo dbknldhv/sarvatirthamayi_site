@@ -6,7 +6,8 @@ exports.getHomeData = async (req, res) => {
         const userId = req.user.id;
         const baseUrl = "https://api.sarvatirthamayi.com/";
 
-        // 1. Fetch Sam's active membership
+        // 1. Fetch active membership card
+        // We lean() for performance and manual manipulation
         const activeCard = await PurchasedMemberCard.findOne({ 
             user_id: userId, 
             card_status: 1 
@@ -15,58 +16,57 @@ exports.getHomeData = async (req, res) => {
         // 2. Fetch Temples
         const popularTemples = await Temple.find({ status: 1 }).sort({ sequence: 1 }).limit(10).lean();
 
+        // Helper to fix Image URLs
         const formatImg = (img) => {
             if (!img) return "";
             if (img.startsWith('http')) return img;
             return `${baseUrl}${img.replace(/\\/g, '/')}`;
         };
 
+        const formattedTemples = popularTemples.map(t => ({
+            id: t.sql_id || 0,
+            name: t.name || "",
+            is_favorite: 0,
+            image: formatImg(t.image),
+            image_thumb: formatImg(t.image)
+        }));
+
+        // 🎯 CONSTRUCT RESPONSE FOR FLUTTER
         return res.status(200).json({
             status: "true",
             success: true,
             message: "api.home_success",
             data: {
                 /**
-                 * 🎯 Matches member_ship_purchase_card_model.dart
-                 * Flutter checks if membership_card is null or has an ID
+                 * 💳 Membership Card Logic
+                 * Flutter's HomeBloc checks 'id > 0' to determine if user is a member.
                  */
                 membership_card: activeCard ? {
-                    id: activeCard.sql_id || 1,
-                    user_id: 0, // Flutter expects int
-                    membership_card_id: activeCard.membership_card_id?.sql_id || 0,
-                    card_status: activeCard.card_status || 1,
-                    card_status_str: "Active",
-                    start_date: activeCard.start_date,
-                    end_date: activeCard.end_date,
-                    membership_card_name: activeCard.membership_card_id?.name || "Member",
-                    membership_card_price: String(activeCard.paid_amount || 0),
-                    paid_amount: String(activeCard.paid_amount || 0)
+                    id: activeCard.sql_id || 1, // Must be > 0
+                    membership_card_id: activeCard.membership_card_id?.sql_id || 1,
+                    membership_card_name: activeCard.membership_card_id?.name || "Active Member",
+                    membership_card_price: String(activeCard.paid_amount || "0"),
+                    membership_card_description: activeCard.membership_card_id?.description || "Access to all rituals",
+                    start_date: activeCard.start_date || "",
+                    end_date: activeCard.end_date || "",
+                    membership_card_visits: activeCard.max_visits || 0,
+                    membership_card_duration: activeCard.membership_card_id?.duration || 1,
+                    membership_card_duration_type: activeCard.membership_card_id?.duration_type || 1,
                 } : {
-                    // Default Guest structure to prevent 'Null check' crash
-                    id: 0,
+                    // Fallback to "Guest" but with ID 0 to tell Flutter to show 'Buy Membership'
+                    id: 0, 
                     membership_card_name: "Guest",
                     membership_card_id: 0,
                     membership_card_price: "0"
                 },
 
-                most_popular_temple: popularTemples.map(t => ({
-                    id: t.sql_id || 0,
-                    name: t.name || "",
-                    is_favorite: 0,
-                    image: formatImg(t.image),
-                    image_thumb: formatImg(t.image)
-                })),
-                trading_temple: popularTemples.map(t => ({
-                    id: t.sql_id || 0,
-                    name: t.name || "",
-                    is_favorite: 0,
-                    image: formatImg(t.image),
-                    image_thumb: formatImg(t.image)
-                })),
+                most_popular_temple: formattedTemples,
+                trading_temple: formattedTemples,
                 offer_zone: []
             }
         });
     } catch (error) {
-        res.status(500).json({ status: "false", message: error.message });
+        console.error("🏠 Home API Error:", error);
+        res.status(500).json({ status: "false", success: false, message: error.message });
     }
 };

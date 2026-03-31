@@ -5,13 +5,15 @@ const path = require("path");
 const pdfGenerator = require("../../utils/pdfGenerator");
 const mailSender = require("../../utils/mailSender");
 const { validateVoucher, redeemVoucher } = require("../../utils/voucherHelper");
-
+const Ritual = require('../../models/Ritual');
+const RitualPackage = require('../../models/RitualPackage');
+const Temple = mongoose.models.Temple || require("../../models/Temple");
 /**
  * 🛠️ DEFENSIVE MODEL LOADING
  */
-const Ritual = mongoose.models.Ritual || require("../../models/Ritual");
+//const Ritual = mongoose.models.Ritual || require("../../models/Ritual");
 const RitualBooking = mongoose.models.RitualBooking || require("../../models/RitualBooking");
-const RitualPackage = mongoose.models.RitualPackage || require("../../models/RitualPackage");
+//const RitualPackage = mongoose.models.RitualPackage || require("../../models/RitualPackage");
 const User = mongoose.models.User || require("../../models/User");
 
 /**
@@ -88,8 +90,8 @@ exports.getAllRituals = async (req, res) => {
 
 exports.getRitualsByTemple = async (req, res) => {
     try {
-        // Flutter sends {"temple_id": 32} in a POST body
         const temple_id = req.body.temple_id || req.query.temple_id;
+        const baseUrl = "https://api.sarvatirthamayi.com/";
 
         if (!temple_id) {
             return res.status(200).json({ status: "true", success: true, data: { data: [] } });
@@ -97,8 +99,9 @@ exports.getRitualsByTemple = async (req, res) => {
 
         const rituals = await Ritual.find({ 
             $or: [
-                { temple_id: mongoose.isValidObjectId(temple_id) ? temple_id : null }, 
-                { temple_sql_id: Number(temple_id) }
+                { temple_id: temple_id }, 
+                { temple_sql_id: Number(temple_id) },
+                { temple_id: mongoose.isValidObjectId(temple_id) ? temple_id : null }
             ],
             status: 1 
         }).populate("temple_id");
@@ -109,23 +112,24 @@ exports.getRitualsByTemple = async (req, res) => {
             description: String(r.description || ""),
             temple_id: Number(temple_id),
             temple_name: String(r.temple_id?.name || ""),
-            image: formatImageUrl(r.image),
-            image_thumb: formatImageUrl(r.image),
-            devotees_booked_count: 0,
-            is_favorite: 0
+            // Path fix for Flutter assets vs network
+            image: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "",
+            image_thumb: r.image ? `${baseUrl}${r.image.replace(/\\/g, '/')}` : "",
+            is_favorite: 0,
+            devotees_booked_count: 0
         }));
 
         res.status(200).json({
             status: "true",
             success: true,
             message: "Temples list fetch successfully",
-            data: { data: formatted } 
+            data: { data: formatted } // 🎯 Flutter Bloc expects this nested structure
         });
     } catch (error) {
-        console.error("🔥 Ritual List Error:", error);
         res.status(500).json({ status: "false", message: error.message });
     }
 };
+
 exports.getRitualDetailsWithPackages = async (req, res) => {
     try {
         const { ritual_id } = req.body; 
@@ -200,9 +204,9 @@ exports.verifyRitualBooking = async (req, res) => {
         }
 
         const [ritualDoc, templeDoc] = await Promise.all([
-            Ritual.findOne({ sql_id: Number(ritualSqlId) }),
-            mongoose.model('Temple').findOne({ sql_id: Number(templeSqlId) })
-        ]);
+    Ritual.findOne({ sql_id: Number(ritualSqlId) }),
+    Temple.findOne({ sql_id: Number(templeSqlId) }) // ✅ Cleaner and safer
+]);
 
         const { pkg, finalPrice, basePrice, discountType, voucherId } = await calculateRitualPrice(
             req.user.id, 
