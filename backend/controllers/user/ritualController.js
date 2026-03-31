@@ -97,11 +97,12 @@ exports.getRitualsByTemple = async (req, res) => {
             return res.status(200).json({ status: "true", success: true, data: { data: [] } });
         }
 
+        const isMongoId = mongoose.isValidObjectId(temple_id);
+
         const rituals = await Ritual.find({ 
             $or: [
-                { temple_id: temple_id }, 
-                { temple_sql_id: Number(temple_id) },
-                { temple_id: mongoose.isValidObjectId(temple_id) ? temple_id : null }
+               { temple_id: isMongoId ? temple_id : null }, 
+                { temple_sql_id: Number(temple_id) }
             ],
             status: 1 
         }).populate("temple_id");
