@@ -1,6 +1,6 @@
 const Donation = require("../../models/Donation");
 const mongoose = require("mongoose");
-const UserDonation = require("../../models/UserDonations");
+const UserDonation = require("../../models/UserDonation");
 
 /**
  * 🛠️ IMAGE HELPER
