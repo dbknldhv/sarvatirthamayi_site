@@ -11,6 +11,7 @@ const ritualController = require("../controllers/user/ritualController");
 const userVoucherController = require("../controllers/user/userVoucherController");
 const homeController = require("../controllers/user/homeController");
 const donationController = require("../controllers/user/donationController");
+const contactController = require("../controllers/user/contactController");
 
 // --- 2. Import Middleware ---
 const { protect } = require("../middleware/authMiddleware");
@@ -20,6 +21,9 @@ const upload = require("../middleware/uploadMiddleware");
 router.get("/test-route", (req, res) => {
   res.json({ message: "User router is working!" });
 });
+
+
+router.post("/contact-us", contactController.contactUs);
 
 // --- 4. Public / Basic Data Routes ---
 router.get("/home", protect, homeController.getHomeData);
