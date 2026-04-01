@@ -37,7 +37,11 @@ router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple)
 router.post("/donation/index", protect, donationController.getDonations);
 router.post("/donation/show", protect, donationController.getDonationById);
 router.post("/donation/update", protect, upload.single("image"), donationController.updateDonation);
-
+router.get(
+  "/donation/booking-details",
+  protect,
+  donationController.getMyDonationBookings
+);
 // --- Ritual Routes ---
 router.post("/ritual/index", protect, ritualController.getRitualsByTemple);
 router.post("/ritual/show", protect, ritualController.getRitualShow);
