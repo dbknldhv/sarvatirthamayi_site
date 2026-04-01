@@ -58,26 +58,24 @@ exports.contactUs = async (req, res) => {
 
     const mailTo = process.env.MAIL_FROM || process.env.MAIL_USER;
 
-    const mailOptions = {
-      from: process.env.MAIL_FROM,
+    await transporter.sendMail({
+      from: process.env.MAIL_FROM || process.env.MAIL_USER,
       to: mailTo,
       replyTo: String(email).trim().toLowerCase(),
       subject: `New Contact Us Request #${contact.sql_id}`,
       html: `
         <h2>New Contact Us Request</h2>
-        <p><strong>SQL ID:</strong> ${contact.sql_id}</p>
+        <p><strong>ID:</strong> ${contact.sql_id}</p>
         <p><strong>Mobile Number:</strong> ${contact.mobile_number}</p>
         <p><strong>Email:</strong> ${contact.email}</p>
         <p><strong>Address:</strong> ${contact.address}</p>
         <p><strong>Created At:</strong> ${contact.created_at}</p>
       `,
-    };
-
-    await transporter.sendMail(mailOptions);
+    });
 
     return res.status(200).json({
       status: "true",
-      message: "Contact request submitted successfully.",
+      message: "Success",
       data: "ok",
     });
   } catch (error) {
