@@ -345,9 +345,21 @@ exports.verifyRitualBooking = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
 
-    const razorpay_order_id = getSourceValue(source, "razorPayOrderId", "razorpay_order_id");
-    const razorpay_payment_id = getSourceValue(source, "razorPayPaymentId", "razorpay_payment_id");
-    const razorpay_signature = getSourceValue(source, "razorPaySignature", "razorpay_signature");
+    const razorpay_order_id = getSourceValue(
+      source,
+      "razorPayOrderId",
+      "razorpay_order_id"
+    );
+    const razorpay_payment_id = getSourceValue(
+      source,
+      "razorPayPaymentId",
+      "razorpay_payment_id"
+    );
+    const razorpay_signature = getSourceValue(
+      source,
+      "razorPaySignature",
+      "razorpay_signature"
+    );
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return sendError(res, 400, "Missing payment verification fields");
@@ -361,8 +373,14 @@ exports.verifyRitualBooking = async (req, res) => {
       return sendError(res, 400, "Invalid Signature");
     }
 
-    const booking = await RitualBooking.findOne({ razorpay_order_id });
-    if (!booking) return sendError(res, 404, "Booking not found");
+    const booking = await RitualBooking.findOne({ razorpay_order_id })
+      .populate("temple_id")
+      .populate("ritual_id")
+      .populate("ritual_package_id");
+
+    if (!booking) {
+      return sendError(res, 404, "Booking not found");
+    }
 
     booking.razorpay_payment_id = razorpay_payment_id;
     booking.payment_status = 2;
@@ -377,9 +395,30 @@ exports.verifyRitualBooking = async (req, res) => {
       success: true,
       message: FLUTTER_MESSAGES.ritualVerifySuccess,
       data: {
-        booking_id: booking.booking_id,
-        razorpay_order_id,
-        razorpay_payment_id,
+        id: Number(booking.sql_id || 0),
+        user_id: 0,
+        temple_id: Number(booking.temple_id?.sql_id || 0),
+        ritual_id: Number(booking.ritual_id?.sql_id || 0),
+        ritual_package_id: Number(booking.ritual_package_id?.sql_id || 0),
+        date: booking.date ? booking.date.toISOString() : null,
+        whatsapp_number: String(booking.whatsapp_number || ""),
+        devotees_name: String(booking.devotees_name || ""),
+        wish: String(booking.wish || ""),
+        booking_status: Number(booking.booking_status || 2),
+        offer_discount_amount: String(booking.offer_discount_amount || 0),
+        original_amount: String(booking.original_amount || 0),
+        paid_amount: String(booking.paid_amount || 0),
+        offer_id: booking.offer_id ?? 0,
+        payment: {
+          razorpay_order_id: String(booking.razorpay_order_id || ""),
+          razorpay_payment_id: String(booking.razorpay_payment_id || ""),
+          razorpay_public_key: String(process.env.RAZORPAY_KEY_ID || ""),
+          payment_status: Number(booking.payment_status || 2),
+          payment_type: Number(booking.payment_type || 2),
+          payment_date: booking.payment_date
+            ? booking.payment_date.toISOString()
+            : null,
+        },
       },
     });
   } catch (error) {
@@ -391,44 +430,25 @@ exports.getMyRitualBookings = async (req, res) => {
   try {
     const bookings = await RitualBooking.find({ user_id: req.user.id })
       .populate("temple_id", "name image sql_id")
-      .populate("ritual_id", "name image sql_id")
+      .populate("ritual_id", "name description image sql_id")
       .populate("ritual_package_id", "name price sql_id")
       .sort({ created_at: -1, _id: -1 })
       .lean();
 
     const formatted = bookings.map((booking) => ({
-      id: Number(booking.sql_id) || 0,
-      booking_id: booking.booking_id || "",
-      date: booking.date,
-      whatsapp_number: booking.whatsapp_number || "",
-      devotees_name: booking.devotees_name || "",
-      wish: booking.wish || "",
-      booking_status: booking.booking_status || 1,
-      payment_status: booking.payment_status || 1,
-      original_amount: String(booking.original_amount || 0),
-      paid_amount: String(booking.paid_amount || 0),
-      created_at: booking.created_at,
-      temple: booking.temple_id
-        ? {
-            id: Number(booking.temple_id.sql_id || 0),
-            name: booking.temple_id.name || "",
-            image: formatImageUrl(booking.temple_id.image || ""),
-            image_thumb: formatImageUrl(booking.temple_id.image || ""),
-          }
-        : null,
+      id: Number(booking.sql_id || 0),
+      temple_id: Number(booking.temple_id?.sql_id || 0),
+      ritual_id: Number(booking.ritual_id?.sql_id || 0),
+      booking_status: Number(booking.booking_status || 1),
+      payment_status: Number(booking.payment_status || 1),
       ritual: booking.ritual_id
         ? {
             id: Number(booking.ritual_id.sql_id || 0),
-            name: booking.ritual_id.name || "",
+            name: String(booking.ritual_id.name || ""),
+            description: String(booking.ritual_id.description || ""),
             image: formatImageUrl(booking.ritual_id.image || ""),
             image_thumb: formatImageUrl(booking.ritual_id.image || ""),
-          }
-        : null,
-      ritual_package: booking.ritual_package_id
-        ? {
-            id: Number(booking.ritual_package_id.sql_id || 0),
-            name: booking.ritual_package_id.name || "",
-            price: String(booking.ritual_package_id.price || 0),
+            is_favorite: 0,
           }
         : null,
     }));
@@ -439,6 +459,19 @@ exports.getMyRitualBookings = async (req, res) => {
       message: FLUTTER_MESSAGES.ritualBookingDetailsSuccess,
       data: {
         data: formatted,
+        total_count: formatted.length,
+        is_next: false,
+        is_prev: false,
+        total_pages: 1,
+        current_page: 1,
+        per_page: formatted.length,
+        from: formatted.length ? 1 : 0,
+        to: formatted.length,
+        next_page_url: null,
+        prev_page_url: null,
+        path: req.originalUrl,
+        has_pages: false,
+        links: [],
       },
     });
   } catch (error) {

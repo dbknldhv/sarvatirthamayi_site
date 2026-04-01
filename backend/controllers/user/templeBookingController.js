@@ -167,46 +167,74 @@ exports.verifyAndConfirmBooking = async (req, res) => {
 };
 
 exports.getMyBookings = async (req, res) => {
-    try {
-        const bookings = await TempleBooking.find({ user_id: req.user.id })
-            .populate("temple_id")
-            .sort({ date: -1 });
+  try {
+    const bookings = await TempleBooking.find({ user_id: req.user.id })
+      .populate("temple_id")
+      .sort({ date: -1 })
+      .lean();
 
-        const formattedBookings = bookings.map(b => ({
-            id: Number(b.sql_id || 0),
-            user_id: 0,
-            temple_id: Number(b.temple_id?.sql_id || 0),
-            date: b.date ? b.date.toISOString() : new Date().toISOString(),
-            whatsapp_number: String(b.whatsapp_number || ""),
-            devotees_name: String(b.devotees_name || ""),
-            wish: String(b.wish || ""),
-            booking_status: Number(b.booking_status || 1),
-            offer_discount_amount: "0",
-            original_amount: String(b.original_amount || "0"),
-            paid_amount: String(b.paid_amount || "0"),
-            created_at: b.createdAt ? b.createdAt.toISOString() : new Date().toISOString(),
-            temple: {
-                id: Number(b.temple_id?.sql_id || 0),
-                name: String(b.temple_id?.name || ""),
-                image: String(b.temple_id?.image || ""),
-                image_thumb: String(b.temple_id?.image || ""),
-                visit_price: String(b.temple_id?.visit_price || "0"),
-                short_description: String(b.temple_id?.short_description || "")
-            }
-        }));
+    const formattedBookings = bookings.map((b) => ({
+      id: Number(b.sql_id || 0),
+      temple_id: Number(b.temple_id?.sql_id || 0),
+      booking_status: Number(b.booking_status || 1),
+      payment_status: Number(b.payment_status || 1),
+      temple: b.temple_id
+        ? {
+            id: Number(b.temple_id.sql_id || 0),
+            name: String(b.temple_id.name || ""),
+            short_description: String(b.temple_id.short_description || ""),
+            long_description: String(b.temple_id.long_description || ""),
+            mobile_number: String(b.temple_id.mobile_number || ""),
+            visit_price: String(b.temple_id.visit_price || "0"),
+            address: {
+              full_address: String(b.temple_id.address_line1 || ""),
+              address_line1: String(b.temple_id.address_line1 || ""),
+              address_line2: String(b.temple_id.address_line2 || ""),
+              landmark: String(b.temple_id.landmark || ""),
+              city: String(b.temple_id.city_name || ""),
+              state: String(b.temple_id.state_name || ""),
+              pincode: String(b.temple_id.pincode || ""),
+              country: String(b.temple_id.country || ""),
+              latitude: String(b.temple_id.latitude || ""),
+              longitude: String(b.temple_id.longitude || ""),
+              address_url: "",
+            },
+            open_time: String(b.temple_id.open_time || ""),
+            close_time: String(b.temple_id.close_time || ""),
+            is_favorite: 0,
+            devotees_booked_count: 0,
+            image: String(b.temple_id.image || ""),
+            image_thumb: String(b.temple_id.image || ""),
+          }
+        : null,
+    }));
 
-        res.status(200).json({
-            status: "true",
-            success: true,
-            message: "Temple booking details fetched successfully.",
-            data: {
-                data: formattedBookings,
-                total_count: formattedBookings.length,
-                is_next: false,
-                is_prev: false
-            }
-        });
-    } catch (error) {
-        res.status(500).json({ status: "false", message: error.message });
-    }
+    return res.status(200).json({
+      status: "true",
+      success: true,
+      message: "Temple booking details fetched successfully.",
+      data: {
+        data: formattedBookings,
+        total_count: formattedBookings.length,
+        is_next: false,
+        is_prev: false,
+        total_pages: 1,
+        current_page: 1,
+        per_page: formattedBookings.length,
+        from: formattedBookings.length ? 1 : 0,
+        to: formattedBookings.length,
+        next_page_url: null,
+        prev_page_url: null,
+        path: req.originalUrl,
+        has_pages: false,
+        links: [],
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: "false",
+      success: false,
+      message: error.message,
+    });
+  }
 };
