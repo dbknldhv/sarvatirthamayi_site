@@ -145,7 +145,9 @@ exports.updateDonation = async (req, res) => {
 
 exports.getMyDonationBookings = async (req, res) => {
   try {
-    const bookings = await UserDonation.find({ user_id: req.user.id })
+    const bookings = await UserDonation.find({ 
+        user_id: Number(req.user.id )
+    })
       .populate("donation_id", "name description image sql_id")
       .sort({ created_at: -1, _id: -1 })
       .lean();
