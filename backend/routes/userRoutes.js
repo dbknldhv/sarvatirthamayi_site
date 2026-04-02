@@ -28,6 +28,7 @@ router.post("/contact-us", contactController.contactUs);
 // --- 4. Public / Basic Data Routes ---
 router.get("/home", protect, homeController.getHomeData);
 router.get("/about-data", aboutController.getAboutPageData);
+router.get("/about-us", aboutController.getAboutUs);
 router.get("/states", joinNowController.getPublicStates);
 
 // --- Temple Public Routes ---
