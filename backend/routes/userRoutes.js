@@ -38,11 +38,10 @@ router.get("/privacy-policy", privacyController.getPrivacyPolicy);
 router.get("/term-condition", termsController.getTermsAndConditions);
 router.get("/states", joinNowController.getPublicStates);
 //offer Zone
-router.get("/offers", offerController.getOffers);
-router.get("/offer/index", offerController.getOffers);
-router.post("/offer/show", offerController.getOfferById);
-router.get("/offers/:id", offerController.getOfferById);
-
+router.get("/offers", protect, offerController.getOffers);
+router.get("/offer/index", protect, offerController.getOffers);
+router.post("/offer/show", protect, offerController.getOfferById);
+router.get("/offers/:id", protect, offerController.getOfferById);
 
 // --- Temple Public Routes ---
 router.get("/temple/index", joinNowController.getPublicTemples);

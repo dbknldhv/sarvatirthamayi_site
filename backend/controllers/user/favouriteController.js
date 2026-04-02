@@ -15,17 +15,26 @@ const getNextSqlId = async () => {
 };
 
 const getTempleBySqlId = async (sqlId) => {
-  return Temple.findOne({ sql_id: Number(sqlId), status: 1 }).lean();
+  return Temple.findOne({
+    sql_id: Number(sqlId),
+    status: 1,
+  }).lean();
 };
 
 const getRitualBySqlId = async (sqlId) => {
-  return Ritual.findOne({ sql_id: Number(sqlId), status: 1 })
+  return Ritual.findOne({
+    sql_id: Number(sqlId),
+    status: 1,
+  })
     .populate("temple_id")
     .lean();
 };
 
 const getOfferByReferenceId = async (referenceId) => {
-  return Offer.findOne({ reference_id: Number(referenceId), status: 1 }).lean();
+  return Offer.findOne({
+    reference_id: Number(referenceId),
+    status: 1,
+  }).lean();
 };
 
 const resolveFavoriteTarget = async (referenceId, type) => {
@@ -35,8 +44,8 @@ const resolveFavoriteTarget = async (referenceId, type) => {
 
     return {
       reference_id: Number(referenceId),
-      temple_id: Number(temple.sql_id) || Number(referenceId),
-      type,
+      temple_id: Number(temple.sql_id) || Number(referenceId) || 0,
+      type: 1,
       type_str: "Temple",
       name: temple.name || "",
       description: temple.short_description || "",
@@ -52,12 +61,12 @@ const resolveFavoriteTarget = async (referenceId, type) => {
     const templeSqlId =
       Number(ritual?.temple_id?.sql_id) ||
       Number(ritual?.temple_id) ||
-      null;
+      0;
 
     return {
       reference_id: Number(referenceId),
       temple_id: templeSqlId,
-      type,
+      type: 2,
       type_str: "Ritual",
       name: ritual.name || "",
       description: ritual.description || "",
@@ -78,8 +87,8 @@ const resolveFavoriteTarget = async (referenceId, type) => {
 
     return {
       reference_id: Number(referenceId),
-      temple_id: Number(offer.temple_id) || null,
-      type,
+      temple_id: Number(offer.temple_id) || 0,
+      type: 6,
       type_str: "Offer",
       name: offer.name || "",
       description: offer.description || "",
@@ -93,7 +102,7 @@ const resolveFavoriteTarget = async (referenceId, type) => {
 
 exports.favourite = async (req, res) => {
   try {
-    const userId = req.user?._id;
+    const userId = req.user?._id || req.user?.id;
     const reference_id = Number(req.body.reference_id);
     const type = Number(req.body.type);
     const action = Number(req.body.action);
@@ -146,9 +155,11 @@ exports.favourite = async (req, res) => {
           sql_id,
           user_id: userId,
           reference_id,
-          temple_id: target.temple_id,
+          temple_id: target.temple_id || 0,
           type,
           status: 1,
+          created_at: new Date(),
+          updated_at: new Date(),
         });
       }
 
@@ -159,11 +170,35 @@ exports.favourite = async (req, res) => {
       });
     }
 
-    await Favorite.deleteOne({
+    // Backend-only fallback for Flutter issue:
+    // If Flutter sends type=1 while removing a non-temple favourite,
+    // and only one favourite exists for that reference_id for this user,
+    // remove that one.
+    let deleteQuery = {
       user_id: userId,
       reference_id,
-      type,
-    });
+    };
+
+    if (type === 1) {
+      const matchedFavorites = await Favorite.find({
+        user_id: userId,
+        reference_id,
+      }).lean();
+
+      if (matchedFavorites.length === 1) {
+        deleteQuery = {
+          user_id: userId,
+          reference_id,
+          type: matchedFavorites[0].type,
+        };
+      } else {
+        deleteQuery.type = type;
+      }
+    } else {
+      deleteQuery.type = type;
+    }
+
+    await Favorite.deleteOne(deleteQuery);
 
     return res.status(200).json({
       status: "success",
@@ -182,7 +217,7 @@ exports.favourite = async (req, res) => {
 
 exports.favouriteGet = async (req, res) => {
   try {
-    const userId = req.user?._id;
+    const userId = req.user?._id || req.user?.id;
     const page = Math.max(Number(req.query.page) || 1, 1);
     const perPage = Math.max(Number(req.query.per_page) || 10, 1);
     const skip = (page - 1) * perPage;
@@ -207,14 +242,13 @@ exports.favouriteGet = async (req, res) => {
 
     for (const fav of favorites) {
       const target = await resolveFavoriteTarget(fav.reference_id, fav.type);
-
       if (!target) continue;
 
       mapped.push({
         id: Number(fav.sql_id) || 0,
         user_id: 0,
         reference_id: Number(fav.reference_id) || 0,
-        temple_id: target.temple_id || 0,
+        temple_id: Number(target.temple_id) || 0,
         temple_name: target.temple_name || "",
         type: Number(fav.type) || 0,
         type_str: target.type_str || "",
@@ -225,7 +259,7 @@ exports.favouriteGet = async (req, res) => {
       });
     }
 
-    const totalPages = Math.ceil(totalCount / perPage) || 1;
+    const totalPages = totalCount > 0 ? Math.ceil(totalCount / perPage) : 1;
     const isNext = page < totalPages;
     const isPrev = page > 1;
 
@@ -242,8 +276,12 @@ exports.favouriteGet = async (req, res) => {
         per_page: perPage,
         from: mapped.length ? skip + 1 : 0,
         to: mapped.length ? skip + mapped.length : 0,
-        next_page_url: isNext ? `/api/v1/favourite/list?page=${page + 1}&per_page=${perPage}` : null,
-        prev_page_url: isPrev ? `/api/v1/favourite/list?page=${page - 1}&per_page=${perPage}` : null,
+        next_page_url: isNext
+          ? `/api/v1/favourite/list?page=${page + 1}&per_page=${perPage}`
+          : null,
+        prev_page_url: isPrev
+          ? `/api/v1/favourite/list?page=${page - 1}&per_page=${perPage}`
+          : null,
         path: "/api/v1/favourite/list",
         has_pages: totalPages > 1,
         links: [],
@@ -256,5 +294,22 @@ exports.favouriteGet = async (req, res) => {
       message: "Something went wrong while fetching favourites",
       data: null,
     });
+  }
+};
+
+exports.isFavourite = async ({ userId, referenceId, type }) => {
+  try {
+    if (!userId || !referenceId || !type) return 0;
+
+    const exists = await Favorite.exists({
+      user_id: userId,
+      reference_id: Number(referenceId),
+      type: Number(type),
+    });
+
+    return exists ? 1 : 0;
+  } catch (error) {
+    console.error("isFavourite helper error:", error);
+    return 0;
   }
 };

@@ -7,6 +7,7 @@ const RitualPackage = require("../../models/RitualPackage");
 const RitualBooking = mongoose.models.RitualBooking || require("../../models/RitualBooking");
 const Temple = mongoose.models.Temple || require("../../models/Temple");
 const formatImageUrl = require("../../utils/imageUrl");
+const Favorite = require("../../models/Favorite");
 
 const FLUTTER_MESSAGES = {
   ritualListSuccess: "Ritual list fetch successfully",
@@ -112,6 +113,18 @@ exports.getRitualsByTemple = async (req, res) => {
       .sort({ sequence: 1, created_at: -1 })
       .lean();
 
+    const ritualSqlIds = rituals.map((r) => Number(r.sql_id)).filter(Boolean);
+
+    const favoriteDocs = await Favorite.find({
+      user_id: req.user._id || req.user.id,
+      type: 2,
+      reference_id: { $in: ritualSqlIds },
+    }).lean();
+
+    const favoriteSet = new Set(
+      favoriteDocs.map((f) => Number(f.reference_id))
+    );
+
     const formatted = rituals.map((ritual) => ({
       id: Number(ritual.sql_id) || 0,
       name: String(ritual.name || ""),
@@ -121,7 +134,7 @@ exports.getRitualsByTemple = async (req, res) => {
       image: formatImageUrl(ritual.image),
       image_thumb: formatImageUrl(ritual.image),
       devotees_booked_count: 0,
-      is_favorite: 0,
+      is_favorite: favoriteSet.has(Number(ritual.sql_id)) ? 1 : 0,
       address: buildTempleAddress(temple),
     }));
 
@@ -150,7 +163,6 @@ exports.getRitualsByTemple = async (req, res) => {
     return sendError(res, 500, error.message);
   }
 };
-
 exports.getRitualShow = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
@@ -168,7 +180,6 @@ exports.getRitualShow = async (req, res) => {
 
     let temple = null;
 
-    // 1) If ritual.temple_id is an ObjectId reference
     if (ritual.temple_id && mongoose.Types.ObjectId.isValid(String(ritual.temple_id))) {
       temple = await Temple.findOne({
         _id: ritual.temple_id,
@@ -176,7 +187,6 @@ exports.getRitualShow = async (req, res) => {
       }).lean();
     }
 
-    // 2) Fallback: if ritual.temple_id is numeric/sql_id
     if (!temple) {
       const ritualTempleSqlId = Number(ritual.temple_id || ritual.templeId || 0);
       if (ritualTempleSqlId > 0) {
@@ -187,7 +197,6 @@ exports.getRitualShow = async (req, res) => {
       }
     }
 
-    // 3) Final fallback: use temple_id coming from request
     if (!temple) {
       const fallbackTempleSqlId = Number(requestedTempleId || 0);
       if (fallbackTempleSqlId > 0) {
@@ -204,6 +213,12 @@ exports.getRitualShow = async (req, res) => {
       Number(requestedTempleId || 0) ||
       0;
 
+    const favouriteExists = await Favorite.exists({
+      user_id: req.user._id || req.user.id,
+      reference_id: Number(ritual.sql_id) || 0,
+      type: 2,
+    });
+
     return res.status(200).json({
       status: "true",
       success: true,
@@ -217,11 +232,11 @@ exports.getRitualShow = async (req, res) => {
         image: formatImageUrl(ritual.image),
         image_thumb: formatImageUrl(ritual.image),
         devotees_booked_count: 0,
-        is_favorite: 0,
+        is_favorite: favouriteExists ? 1 : 0,
         address: {
           full_address: [temple?.address_line1, temple?.address_line2, temple?.city_name, temple?.state_name, temple?.pincode]
-              .filter((v) => v !== null && v !== undefined && String(v).trim() !== "")
-              .join(", "),
+            .filter((v) => v !== null && v !== undefined && String(v).trim() !== "")
+            .join(", "),
           address_line1: String(temple?.address_line1 || ""),
           address_line2: String(temple?.address_line2 || ""),
           landmark: String(temple?.landmark || ""),
@@ -488,6 +503,20 @@ exports.getMyRitualBookings = async (req, res) => {
       .sort({ created_at: -1, _id: -1 })
       .lean();
 
+    const ritualIds = bookings
+      .map((booking) => Number(booking.ritual_id?.sql_id || 0))
+      .filter(Boolean);
+
+    const favoriteDocs = await Favorite.find({
+      user_id: req.user._id || req.user.id,
+      type: 2,
+      reference_id: { $in: ritualIds },
+    }).lean();
+
+    const favoriteSet = new Set(
+      favoriteDocs.map((f) => Number(f.reference_id))
+    );
+
     const formatted = bookings.map((booking) => ({
       id: Number(booking.sql_id || 0),
       temple_id: Number(booking.temple_id?.sql_id || 0),
@@ -501,7 +530,7 @@ exports.getMyRitualBookings = async (req, res) => {
             description: String(booking.ritual_id.description || ""),
             image: formatImageUrl(booking.ritual_id.image || ""),
             image_thumb: formatImageUrl(booking.ritual_id.image || ""),
-            is_favorite: 0,
+            is_favorite: favoriteSet.has(Number(booking.ritual_id.sql_id)) ? 1 : 0,
           }
         : null,
     }));

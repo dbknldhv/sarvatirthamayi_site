@@ -1,5 +1,6 @@
 // controllers/user/offerController.js
 const Offer = require("../../models/Offer");
+const Favorite = require("../../models/Favorite");
 const formatImageUrl = require("../../utils/imageUrl");
 
 const getOffers = async (req, res) => {
@@ -8,7 +9,6 @@ const getOffers = async (req, res) => {
     const perPage = Math.max(parseInt(req.query.per_page || req.body.per_page || 10, 10), 1);
 
     const skip = (page - 1) * perPage;
-
     const query = { status: 1 };
 
     const totalCount = await Offer.countDocuments(query);
@@ -18,6 +18,23 @@ const getOffers = async (req, res) => {
       .skip(skip)
       .limit(perPage)
       .lean();
+
+    const userId = req.user?._id || req.user?.id || null;
+    let favoriteSet = new Set();
+
+    if (userId && offers.length > 0) {
+      const referenceIds = offers.map((item) => Number(item.reference_id)).filter(Boolean);
+
+      const favoriteDocs = await Favorite.find({
+        user_id: userId,
+        type: 6,
+        reference_id: { $in: referenceIds },
+      }).lean();
+
+      favoriteSet = new Set(
+        favoriteDocs.map((fav) => Number(fav.reference_id))
+      );
+    }
 
     const formattedOffers = offers.map((item) => ({
       id: item.sql_id || 0,
@@ -33,11 +50,11 @@ const getOffers = async (req, res) => {
       reference_id: item.reference_id || 0,
       status: item.status || 0,
       sequence: item.sequence || 0,
-      is_favorite: 0,
+      is_favorite: favoriteSet.has(Number(item.reference_id)) ? 1 : 0,
       image: formatImageUrl(item.image),
     }));
 
-    const totalPages = Math.ceil(totalCount / perPage);
+    const totalPages = totalCount > 0 ? Math.ceil(totalCount / perPage) : 1;
     const isNext = page < totalPages;
     const isPrev = page > 1;
 
@@ -54,9 +71,13 @@ const getOffers = async (req, res) => {
         per_page: perPage,
         from: totalCount === 0 ? 0 : skip + 1,
         to: skip + formattedOffers.length,
-        next_page_url: isNext ? `/api/user/offers?page=${page + 1}&per_page=${perPage}` : null,
-        prev_page_url: isPrev ? `/api/user/offers?page=${page - 1}&per_page=${perPage}` : null,
-        path: "/api/user/offers",
+        next_page_url: isNext
+          ? `/api/v1/offers?page=${page + 1}&per_page=${perPage}`
+          : null,
+        prev_page_url: isPrev
+          ? `/api/v1/offers?page=${page - 1}&per_page=${perPage}`
+          : null,
+        path: "/api/v1/offers",
         has_pages: totalPages > 1,
         links: [],
       },
@@ -94,6 +115,19 @@ const getOfferById = async (req, res) => {
       });
     }
 
+    const userId = req.user?._id || req.user?.id || null;
+    let isFavorite = 0;
+
+    if (userId) {
+      const favoriteExists = await Favorite.exists({
+        user_id: userId,
+        type: 6,
+        reference_id: Number(offer.reference_id),
+      });
+
+      isFavorite = favoriteExists ? 1 : 0;
+    }
+
     return res.status(200).json({
       status: "true",
       message: "Offer fetched successfully",
@@ -111,7 +145,7 @@ const getOfferById = async (req, res) => {
         reference_id: offer.reference_id || 0,
         status: offer.status || 0,
         sequence: offer.sequence || 0,
-        is_favorite: 0,
+        is_favorite: isFavorite,
         image: formatImageUrl(offer.image),
       },
     });
