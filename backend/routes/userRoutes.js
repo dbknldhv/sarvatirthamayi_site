@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-// --- 1. Import Controllers ---
+// --- Controllers ---
 const aboutController = require("../controllers/user/aboutController");
 const joinNowController = require("../controllers/user/join-nowController");
 const userController = require("../controllers/user/userController");
@@ -12,37 +12,47 @@ const userVoucherController = require("../controllers/user/userVoucherController
 const homeController = require("../controllers/user/homeController");
 const donationController = require("../controllers/user/donationController");
 const contactController = require("../controllers/user/contactController");
-const favouriteController = require("../controllers/user/favouriteController");
-
-const termsController = require("../controllers/user/termsController");   
+const termsController = require("../controllers/user/termsController");
 const privacyController = require("../controllers/user/privacyController");
-
+const favouriteController = require("../controllers/user/favouriteController");
 const offerController = require("../controllers/user/offerController");
 
-// --- 2. Import Middleware ---
+// --- Middleware ---
 const { protect } = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
 
-// --- 3. Base & Health Check Routes ---
+// --- Health Check ---
 router.get("/test-route", (req, res) => {
   res.json({ message: "User router is working!" });
 });
 
-
+// --- Contact ---
 router.post("/contact-us", contactController.contactUs);
 
-// --- 4. Public / Basic Data Routes ---
-router.get("/home", protect, homeController.getHomeData);
+// --- Public / Basic Data ---
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/about-us", aboutController.getAboutUs);
 router.get("/privacy-policy", privacyController.getPrivacyPolicy);
 router.get("/term-condition", termsController.getTermsAndConditions);
 router.get("/states", joinNowController.getPublicStates);
-//offer Zone
+
+// --- Home ---
+router.get("/home", protect, homeController.getHomeData);
+
+// --- Offer Zone ---
 router.get("/offers", protect, offerController.getOffers);
 router.get("/offer/index", protect, offerController.getOffers);
 router.post("/offer/show", protect, offerController.getOfferById);
 router.get("/offers/:id", protect, offerController.getOfferById);
+
+// --- Favourite / Favorite Compatibility ---
+router.post("/favourite", protect, favouriteController.favourite);
+router.post("/favorite", protect, favouriteController.favourite);
+
+router.get("/favourite/list", protect, favouriteController.favouriteGet);
+router.get("/favorite/list", protect, favouriteController.favouriteGet);
+router.get("/favourite/index", protect, favouriteController.favouriteGet);
+router.get("/favorite/index", protect, favouriteController.favouriteGet);
 
 // --- Temple Public Routes ---
 router.get("/temple/index", joinNowController.getPublicTemples);
@@ -54,16 +64,17 @@ router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple)
 // --- Donation Routes ---
 router.post("/donation/index", protect, donationController.getDonations);
 router.post("/donation/show", protect, donationController.getDonationById);
-router.post("/donation/update", protect, upload.single("image"), donationController.updateDonation);
+router.post(
+  "/donation/update",
+  protect,
+  upload.single("image"),
+  donationController.updateDonation
+);
 router.get(
   "/donation/booking-details",
   protect,
   donationController.getMyDonationBookings
 );
-
-router.post("/favourite", protect, favouriteController.favourite);
-router.get("/favourite/list", protect, favouriteController.favouriteGet);
-router.get("/favorite/index", protect, favouriteController.favouriteGet);
 
 // --- Ritual Routes ---
 router.post("/ritual/index", protect, ritualController.getRitualsByTemple);
@@ -88,6 +99,7 @@ router.get("/auth/check-auth", protect, (req, res) => {
 });
 
 router.get("/profile", protect, userController.getProfile);
+
 router.post(
   "/profile",
   protect,
