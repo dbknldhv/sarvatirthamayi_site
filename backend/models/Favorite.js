@@ -3,13 +3,12 @@ const mongoose = require("mongoose");
 const favoriteSchema = new mongoose.Schema(
   {
     sql_id: {
-      type: mongoose.Schema.Types.Mixed,
-      requried: true,
+      type: Number,
+      required: true,
       index: true,
     },
     user_id: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
+      type: Number,
       required: true,
       index: true,
     },
@@ -20,7 +19,7 @@ const favoriteSchema = new mongoose.Schema(
     },
     temple_id: {
       type: Number,
-      default: null,
+      default: 0,
       index: true,
     },
     type: {
