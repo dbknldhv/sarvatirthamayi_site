@@ -49,11 +49,16 @@ router.get("/offers/:id", protect, offerController.getOfferById);
 router.post("/favourite", protect, favouriteController.favourite);
 router.post("/favorite", protect, favouriteController.favourite);
 
+/* Favourite APIs */
+
+router.post("/favourite", protect, favouriteController.favourite);
+router.post("/favorite", protect, favouriteController.favourite);
+
 router.get("/favourite/list", protect, favouriteController.favouriteGet);
 router.get("/favorite/list", protect, favouriteController.favouriteGet);
-router.get("/favourite/index", protect, favouriteController.favouriteGet);
-router.get("/favorite/index", protect, favouriteController.favouriteGet);
 
+router.get("/favorite/index", protect, favouriteController.favouriteGet);
+router.get("/favourite/index", protect, favouriteController.favouriteGet);
 // --- Temple Public Routes ---
 router.get("/temple/index", joinNowController.getPublicTemples);
 router.post("/temple/show", joinNowController.getPublicTempleById);
