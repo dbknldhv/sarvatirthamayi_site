@@ -12,11 +12,11 @@ const userVoucherController = require("../controllers/user/userVoucherController
 const homeController = require("../controllers/user/homeController");
 const donationController = require("../controllers/user/donationController");
 const contactController = require("../controllers/user/contactController");
-const termsController = require("../controllers/user/termsController"); 
+
+const termsController = require("../controllers/user/termsController");   
 const privacyController = require("../controllers/user/privacyController");
 
 const offerController = require("../controllers/user/offerController");
-
 // --- 2. Import Middleware ---
 const { protect } = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
