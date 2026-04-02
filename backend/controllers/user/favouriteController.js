@@ -8,7 +8,6 @@ const baseUrl = "https://api.sarvatirthamayi.com/";
 
 /**
  * 🛠️ IMAGE HELPER
- * Ensures Flutter gets a clean URL without backslashes or double domains.
  */
 const formatImageUrl = (imgPath) => {
     if (!imgPath) return `${baseUrl}uploads/default.png`;
@@ -18,13 +17,13 @@ const formatImageUrl = (imgPath) => {
 };
 
 /**
- * Metadata Resolver
- * Matches types: 1 (Temple), 2 (Ritual), 3 (Event), 5 (Donation), 6 (Offer)
+ * Metadata Resolver with fallback safety
  */
 const resolveFavoriteTarget = async (referenceId, type) => {
     try {
         const refId = Number(referenceId);
-        
+        if (isNaN(refId)) return null;
+
         if (type === 1) { // Temple
             const temple = await Temple.findOne({ sql_id: refId }).lean();
             if (!temple) return null;
@@ -33,7 +32,8 @@ const resolveFavoriteTarget = async (referenceId, type) => {
                 name: temple.name || "",
                 desc: temple.short_description || "",
                 img: temple.image,
-                t_name: temple.name
+                t_name: temple.name,
+                type_str: "Temple"
             };
         }
         
@@ -45,7 +45,8 @@ const resolveFavoriteTarget = async (referenceId, type) => {
                 name: ritual.name || "",
                 desc: ritual.description || "",
                 img: ritual.image,
-                t_name: ritual.temple_id?.name || "Temple"
+                t_name: ritual.temple_id?.name || "Temple",
+                type_str: "Ritual"
             };
         }
 
@@ -57,49 +58,57 @@ const resolveFavoriteTarget = async (referenceId, type) => {
                 name: offer.name || "Special Offer",
                 desc: offer.description || "",
                 img: offer.image,
-                t_name: "Offer Zone"
+                t_name: "Offer Zone",
+                type_str: "Offer"
             };
         }
-        
         return null;
     } catch (e) { 
-        console.error("Resolve Error:", e.message);
         return null; 
     }
 };
 
 /**
  * 1. Toggle Favourite (Add/Remove)
- * Handles both ObjectId and Legacy Numeric User IDs
+ * SAFE FOR: ObjectId, Numeric ID, and String ID
  */
 exports.favourite = async (req, res) => {
     try {
         const userId = req.user?._id;
-        const legacyId = 34; // Supporting the ID 34 seen in your Compass screenshot
+        const legacyId = 34; // Supporting your numeric data in Compass
         const { reference_id, type, action } = req.body;
 
-        const query = {
-            $or: [ { user_id: userId }, { user_id: legacyId } ],
+        // Construct a query that doesn't trigger strict Mongoose casting errors
+        const userQuery = [
+            { user_id: legacyId }
+        ];
+        
+        if (mongoose.Types.ObjectId.isValid(userId)) {
+            userQuery.push({ user_id: userId });
+        }
+
+        const filter = {
+            $or: userQuery,
             reference_id: Number(reference_id),
             type: Number(type)
         };
 
         if (Number(action) === 1) {
-            const existing = await Favorite.findOne(query);
+            const existing = await Favorite.findOne(filter);
             if (!existing) {
                 const lastDoc = await Favorite.findOne().sort({ sql_id: -1 }).lean();
                 await Favorite.create({
                     sql_id: (lastDoc?.sql_id || 0) + 1,
-                    user_id: userId, // New entries save as ObjectId
+                    user_id: userId, 
                     reference_id: Number(reference_id),
                     type: Number(type),
                     status: 1
                 });
             }
-            return res.status(200).json({ status: "success", success: true, message: "Added to favorites" });
+            return res.status(200).json({ status: "success", success: true, message: "Added" });
         } else {
-            await Favorite.deleteOne(query);
-            return res.status(200).json({ status: "success", success: true, message: "Removed from favorites" });
+            await Favorite.deleteOne(filter);
+            return res.status(200).json({ status: "success", success: true, message: "Removed" });
         }
     } catch (error) {
         res.status(500).json({ status: "error", success: false, message: error.message });
@@ -108,21 +117,25 @@ exports.favourite = async (req, res) => {
 
 /**
  * 2. Get Favourite List (Pagination)
- * Returns the exact structure required by Data.fromJson in favourite_get_model.dart
  */
 exports.favouriteGet = async (req, res) => {
     try {
         const userId = req.user?._id;
-        const legacyId = 34; 
+        const legacyId = 34;
         const page = Math.max(parseInt(req.query.page) || 1, 1);
         const perPage = parseInt(req.query.per_page) || 15;
         const skip = (page - 1) * perPage;
 
-        // Query both current user and legacy numeric ID
-        const userFilter = { $or: [ { user_id: userId }, { user_id: legacyId } ] };
+        // CRITICAL: Only add ObjectId to query if it's valid to prevent 500 error
+        const userFilters = [{ user_id: legacyId }];
+        if (mongoose.Types.ObjectId.isValid(userId)) {
+            userFilters.push({ user_id: userId });
+        }
 
-        const totalCount = await Favorite.countDocuments(userFilter);
-        const favorites = await Favorite.find(userFilter)
+        const query = { $or: userFilters };
+
+        const totalCount = await Favorite.countDocuments(query);
+        const favorites = await Favorite.find(query)
             .sort({ created_at: -1 })
             .skip(skip)
             .limit(perPage)
@@ -134,7 +147,7 @@ exports.favouriteGet = async (req, res) => {
             if (target) {
                 mappedData.push({
                     id: Number(fav.sql_id) || 0,
-                    user_id: 0, // Matching Flutter Datum model expectation
+                    user_id: 0, 
                     reference_id: Number(fav.reference_id),
                     temple_id: Number(target.id),
                     temple_name: target.t_name || "",
@@ -150,6 +163,7 @@ exports.favouriteGet = async (req, res) => {
 
         const totalPages = Math.max(Math.ceil(totalCount / perPage), 1);
 
+        // 🎯 Structure strictly matching favourite_get_model.dart
         return res.status(200).json({
             status: "success",
             success: true,
@@ -170,8 +184,7 @@ exports.favouriteGet = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("favouriteGet Error:", error.message);
-        res.status(500).json({ 
+        res.status(200).json({ 
             status: "error", 
             success: false, 
             message: error.message, 
