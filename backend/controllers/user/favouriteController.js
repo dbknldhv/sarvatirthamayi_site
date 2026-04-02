@@ -2,6 +2,7 @@ const Favorite = require("../../models/Favorite");
 const Temple = require("../../models/Temple");
 const Ritual = require("../../models/Ritual");
 const Offer = require("../../models/Offer");
+const User = require("../../models/User");
 
 const baseUrl = "https://api.sarvatirthamayi.com/";
 
@@ -12,8 +13,21 @@ const formatImageUrl = (imgPath) => {
   return `${baseUrl}${cleanPath.startsWith("/") ? cleanPath.substring(1) : cleanPath}`;
 };
 
-const getUserNumericId = (req) => {
-  return Number(req.user?.sql_id || req.user?.user_id || req.user?.id || 0);
+const getAuthUserObjectId = (req) => {
+  return req.user?._id || req.user?.id || null;
+};
+
+const getUserNumericId = async (req) => {
+  if (req.user?.sql_id) return Number(req.user.sql_id);
+  if (req.user?.user_id && !isNaN(Number(req.user.user_id))) {
+    return Number(req.user.user_id);
+  }
+
+  const authUserId = getAuthUserObjectId(req);
+  if (!authUserId) return 0;
+
+  const user = await User.findById(authUserId).select("sql_id").lean();
+  return Number(user?.sql_id || 0);
 };
 
 const getNextSqlId = async () => {
@@ -104,7 +118,7 @@ const resolveFavoriteTarget = async (referenceId, type) => {
 
 exports.favourite = async (req, res) => {
   try {
-    const userId = getUserNumericId(req);
+    const userId = await getUserNumericId(req);
     const reference_id = Number(req.body.reference_id);
     const type = Number(req.body.type);
     const action = Number(req.body.action);
@@ -197,7 +211,7 @@ exports.favourite = async (req, res) => {
 
 exports.favouriteGet = async (req, res) => {
   try {
-    const userId = getUserNumericId(req);
+    const userId = await getUserNumericId(req);
     const page = Math.max(Number(req.query.page) || 1, 1);
     const perPage = Math.max(Number(req.query.per_page) || 10, 1);
     const skip = (page - 1) * perPage;
