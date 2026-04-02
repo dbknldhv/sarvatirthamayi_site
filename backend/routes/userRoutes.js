@@ -13,6 +13,7 @@ const homeController = require("../controllers/user/homeController");
 const donationController = require("../controllers/user/donationController");
 const contactController = require("../controllers/user/contactController");
 const termsController = require("../controllers/user/termsController"); 
+const privacyController = require("../controllers/user/privacyController");
 
 // --- 2. Import Middleware ---
 const { protect } = require("../middleware/authMiddleware");
@@ -31,6 +32,7 @@ router.get("/home", protect, homeController.getHomeData);
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/about-us", aboutController.getAboutUs);
 router.get("/term-condition", termsController.getTermsAndConditions);
+router.get("/privacy-policy", privacyController.getPrivacyPolicy);
 
 router.get("/states", joinNowController.getPublicStates);
 
