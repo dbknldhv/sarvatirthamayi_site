@@ -56,23 +56,24 @@ exports.getHomeData = async (req, res) => {
       image: formatImageUrl(t.image),
       image_thumb: formatImageUrl(t.image),
     }));
-
-      const formattedOffers = offers.map((o) => ({
+  const formattedOffers = offers.map((o) => ({
   id: parseInt(o.sql_id) || 0,
   temple_id: Number(o.temple_id) || 0,
   name: o.name || "",
   description: o.description || "",
   discount_percentage: Number(o.discount_percentage ?? 0),
-  discount_amount:
+  discount_amount: String(
     o.discount_amount != null
-      ? Number(o.discount_amount)
-      : Number(o.discount_percentage ?? 0),
+      ? o.discount_amount
+      : (o.discount_percentage ?? 0)
+  ),
   type: Number(o.type) || 0,
   reference_id: Number(o.reference_id) || 0,
   is_favorite: favoriteOfferSet.has(Number(o.reference_id)) ? 1 : 0,
   image: formatImageUrl(o.image),
   image_thumb: formatImageUrl(o.image),
 }));
+    
 
     return res.status(200).json({
       status: "true",
