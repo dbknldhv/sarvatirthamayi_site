@@ -62,6 +62,7 @@ router.get(
 
 router.post("/favourite", protect, favouriteController.favourite);
 router.get("/favourite/list", protect, favouriteController.favouriteGet);
+router.get("/favorite/index", protect, favouriteController.favouriteGet);
 
 // --- Ritual Routes ---
 router.post("/ritual/index", protect, ritualController.getRitualsByTemple);
