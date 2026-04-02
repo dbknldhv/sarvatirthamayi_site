@@ -58,21 +58,25 @@ exports.getHomeData = async (req, res) => {
     }));
 
     const formattedOffers = offers.map((o) => ({
-      id: parseInt(o.sql_id) || 0,
-      temple_id: o.temple_id || 0,
-      name: o.name || "",
-      description: o.description || "",
-      discount_percentage: o.discount_percentage || 0,
-      discount_amount:
-        o.discount_amount != null
-          ? o.discount_amount
-          : (o.discount_percentage || 0),
-      type: o.type || 0,
-      reference_id: o.reference_id || 0,
-      is_favorite: favoriteOfferSet.has(Number(o.reference_id)) ? 1 : 0,
-      image: formatImageUrl(o.image),
-      image_thumb: formatImageUrl(o.image),
-    }));
+  id: parseInt(o.sql_id) || 0,
+  temple_id: o.temple_id || 0,
+  name: o.name || "",
+  description: o.description || "",
+
+  discount_percentage: String(o.discount_percentage ?? 0),
+
+  discount_amount: String(
+    o.discount_amount != null
+      ? o.discount_amount
+      : (o.discount_percentage ?? 0)
+  ),
+
+  type: o.type || 0,
+  reference_id: o.reference_id || 0,
+  is_favorite: favoriteOfferSet.has(Number(o.reference_id)) ? 1 : 0,
+  image: formatImageUrl(o.image),
+  image_thumb: formatImageUrl(o.image),
+}));
 
     return res.status(200).json({
       status: "true",
