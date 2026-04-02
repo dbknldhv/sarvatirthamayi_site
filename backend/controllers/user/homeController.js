@@ -1,11 +1,12 @@
 const Temple = require("../../models/Temple");
 const PurchasedMemberCard = require("../../models/PurchasedMemberCard");
 const Offer = require("../../models/Offer");
+const Favorite = require("../../models/Favorite");
 const formatImageUrl = require("../../utils/imageUrl");
 
 exports.getHomeData = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user._id || req.user.id;
 
     const activeCard = await PurchasedMemberCard.findOne({
       user_id: userId,
@@ -19,19 +20,42 @@ exports.getHomeData = async (req, res) => {
       .limit(10)
       .lean();
 
-    const formattedTemples = popularTemples.map((t) => ({
-      id: parseInt(t.sql_id) || 0,
-      name: t.name || "",
-      is_favorite: 0,
-      image: formatImageUrl(t.image),
-      image_thumb: formatImageUrl(t.image),
-    }));
-
-    // ===== Fetch Offer Zone Data =====
     const offers = await Offer.find({ status: 1 })
       .sort({ sequence: 1 })
       .limit(5)
       .lean();
+
+    // Build favourite lookup for this user
+    const templeReferenceIds = popularTemples.map((t) => Number(t.sql_id)).filter(Boolean);
+    const offerReferenceIds = offers.map((o) => Number(o.reference_id)).filter(Boolean);
+
+    const favoriteDocs = await Favorite.find({
+      user_id: userId,
+      $or: [
+        { type: 1, reference_id: { $in: templeReferenceIds } }, // Temple favourites
+        { type: 6, reference_id: { $in: offerReferenceIds } },  // Offer favourites
+      ],
+    }).lean();
+
+    const favoriteTempleSet = new Set(
+      favoriteDocs
+        .filter((f) => Number(f.type) === 1)
+        .map((f) => Number(f.reference_id))
+    );
+
+    const favoriteOfferSet = new Set(
+      favoriteDocs
+        .filter((f) => Number(f.type) === 6)
+        .map((f) => Number(f.reference_id))
+    );
+
+    const formattedTemples = popularTemples.map((t) => ({
+      id: parseInt(t.sql_id) || 0,
+      name: t.name || "",
+      is_favorite: favoriteTempleSet.has(Number(t.sql_id)) ? 1 : 0,
+      image: formatImageUrl(t.image),
+      image_thumb: formatImageUrl(t.image),
+    }));
 
     const formattedOffers = offers.map((o) => ({
       id: parseInt(o.sql_id) || 0,
@@ -39,9 +63,13 @@ exports.getHomeData = async (req, res) => {
       name: o.name || "",
       description: o.description || "",
       discount_percentage: o.discount_percentage || 0,
-      discount_amount: o.discount_amount || null,
+      discount_amount:
+        o.discount_amount != null
+          ? o.discount_amount
+          : (o.discount_percentage || 0),
       type: o.type || 0,
       reference_id: o.reference_id || 0,
+      is_favorite: favoriteOfferSet.has(Number(o.reference_id)) ? 1 : 0,
       image: formatImageUrl(o.image),
       image_thumb: formatImageUrl(o.image),
     }));

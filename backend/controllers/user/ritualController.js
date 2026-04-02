@@ -155,18 +155,54 @@ exports.getRitualShow = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
     const ritualId = getSourceValue(source, "ritual_id", "ritualId");
-    const templeId = getSourceValue(source, "temple_id", "templeId");
+    const requestedTempleId = getSourceValue(source, "temple_id", "templeId");
 
     if (!ritualId) return sendError(res, 400, "ritual_id is required");
 
     const ritual = await Ritual.findOne({
       ...buildRitualLookup(ritualId),
       status: 1,
-    }).populate("temple_id");
+    }).lean();
 
     if (!ritual) return sendError(res, 404, "Ritual not found");
 
-    const temple = ritual.temple_id || null;
+    let temple = null;
+
+    // 1) If ritual.temple_id is an ObjectId reference
+    if (ritual.temple_id && mongoose.Types.ObjectId.isValid(String(ritual.temple_id))) {
+      temple = await Temple.findOne({
+        _id: ritual.temple_id,
+        status: 1,
+      }).lean();
+    }
+
+    // 2) Fallback: if ritual.temple_id is numeric/sql_id
+    if (!temple) {
+      const ritualTempleSqlId = Number(ritual.temple_id || ritual.templeId || 0);
+      if (ritualTempleSqlId > 0) {
+        temple = await Temple.findOne({
+          sql_id: ritualTempleSqlId,
+          status: 1,
+        }).lean();
+      }
+    }
+
+    // 3) Final fallback: use temple_id coming from request
+    if (!temple) {
+      const fallbackTempleSqlId = Number(requestedTempleId || 0);
+      if (fallbackTempleSqlId > 0) {
+        temple = await Temple.findOne({
+          sql_id: fallbackTempleSqlId,
+          status: 1,
+        }).lean();
+      }
+    }
+
+    const resolvedTempleId =
+      Number(temple?.sql_id) ||
+      Number(ritual.temple_id || ritual.templeId || 0) ||
+      Number(requestedTempleId || 0) ||
+      0;
 
     return res.status(200).json({
       status: "true",
@@ -174,7 +210,7 @@ exports.getRitualShow = async (req, res) => {
       message: FLUTTER_MESSAGES.ritualShowSuccess,
       data: {
         id: Number(ritual.sql_id) || 0,
-        temple_id: Number(temple?.sql_id || toNumberOrNull(templeId) || 0),
+        temple_id: resolvedTempleId,
         temple_name: String(temple?.name || ""),
         name: String(ritual.name || ""),
         description: String(ritual.description || ""),
@@ -182,7 +218,21 @@ exports.getRitualShow = async (req, res) => {
         image_thumb: formatImageUrl(ritual.image),
         devotees_booked_count: 0,
         is_favorite: 0,
-        address: buildTempleAddress(temple),
+        address: {
+          full_address: [temple?.address_line1, temple?.address_line2, temple?.city_name, temple?.state_name, temple?.pincode]
+              .filter((v) => v !== null && v !== undefined && String(v).trim() !== "")
+              .join(", "),
+          address_line1: String(temple?.address_line1 || ""),
+          address_line2: String(temple?.address_line2 || ""),
+          landmark: String(temple?.landmark || ""),
+          city: String(temple?.city_name || ""),
+          state: String(temple?.state_name || ""),
+          pincode: String(temple?.pincode || ""),
+          country: String(temple?.country_name || ""),
+          latitude: temple?.latitude != null ? String(temple.latitude) : "",
+          longitude: temple?.longitude != null ? String(temple.longitude) : "",
+          address_url: String(temple?.address_url || ""),
+        },
       },
     });
   } catch (error) {
@@ -214,17 +264,16 @@ exports.getRitualPackages = async (req, res) => {
 
     const ritualTempleId = Number(ritual.temple_id || ritual.templeId || 0);
 
-    const formatted = packages.map((pkg) => ({
-      id: Number(pkg.sql_id) || 0,
-      ritual_id: Number(ritual.sql_id) || 0,
-      temple_id: ritualTempleId,
-      name: String(pkg.name || ""),
-      description: String(pkg.description || ""),
-      devotees_count: Number(pkg.devotees_count || 1),
-      price: String(pkg.price || 0),
-      offer_price: String(pkg.offer_price || pkg.price || 0),
-    }));
-
+const formatted = packages.map((pkg) => ({
+  id: Number(pkg.sql_id) || 0,
+  ritual_id: Number(ritual.sql_id) || 0,
+  temple_id: ritualTempleId,
+  name: String(pkg.name || ""),
+  description: String(pkg.description || ""),
+  devotees_count: Number(pkg.devotees_count || 1),
+  price: String(pkg.price || 0),
+  offer_price: String(pkg.offer_price || pkg.price || 0),
+}));
     return res.status(200).json({
       status: "true",
       success: true,

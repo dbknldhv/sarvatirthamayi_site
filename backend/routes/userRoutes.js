@@ -15,8 +15,9 @@ const contactController = require("../controllers/user/contactController");
 
 const termsController = require("../controllers/user/termsController");   
 const privacyController = require("../controllers/user/privacyController");
-
+const favouriteController = require("../controllers/user/favouriteController");
 const offerController = require("../controllers/user/offerController");
+
 // --- 2. Import Middleware ---
 const { protect } = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
@@ -59,6 +60,10 @@ router.get(
   protect,
   donationController.getMyDonationBookings
 );
+
+router.post("/favourite", protect, favouriteController.favourite);
+router.get("/favourite/list", protect, favouriteController.favouriteGet);
+
 // --- Ritual Routes ---
 router.post("/ritual/index", protect, ritualController.getRitualsByTemple);
 router.post("/ritual/show", protect, ritualController.getRitualShow);
