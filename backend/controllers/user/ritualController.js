@@ -193,6 +193,7 @@ exports.getRitualShow = async (req, res) => {
 exports.getRitualPackages = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
+
     const ritualId = getSourceValue(source, "ritual_id", "ritualId");
 
     if (!ritualId) return sendError(res, 400, "ritual_id is required");
@@ -211,15 +212,17 @@ exports.getRitualPackages = async (req, res) => {
       .sort({ created_at: 1, _id: 1 })
       .lean();
 
+    const ritualTempleId = Number(ritual.temple_id || ritual.templeId || 0);
+
     const formatted = packages.map((pkg) => ({
       id: Number(pkg.sql_id) || 0,
       ritual_id: Number(ritual.sql_id) || 0,
-      temple_id: 0,
+      temple_id: ritualTempleId,
       name: String(pkg.name || ""),
       description: String(pkg.description || ""),
       devotees_count: Number(pkg.devotees_count || 1),
       price: String(pkg.price || 0),
-      offer_price: String(pkg.price || 0),
+      offer_price: String(pkg.offer_price || pkg.price || 0),
     }));
 
     return res.status(200).json({
@@ -234,6 +237,7 @@ exports.getRitualPackages = async (req, res) => {
     return sendError(res, 500, error.message);
   }
 };
+
 
 exports.createRitualOrder = async (req, res) => {
   try {
