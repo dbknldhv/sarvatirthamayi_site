@@ -24,8 +24,11 @@ const getOffers = async (req, res) => {
       temple_id: item.temple_id || 0,
       name: item.name || "",
       description: item.description || "",
-      discount_percentage: item.discount_percentage ?? null,
-      discount_amount: item.discount_amount ?? null,
+      discount_percentage: item.discount_percentage ?? 0,
+      discount_amount:
+        item.discount_amount != null
+          ? item.discount_amount
+          : (item.discount_percentage ?? 0),
       type: item.type || 0,
       reference_id: item.reference_id || 0,
       status: item.status || 0,
@@ -99,8 +102,11 @@ const getOfferById = async (req, res) => {
         temple_id: offer.temple_id || 0,
         name: offer.name || "",
         description: offer.description || "",
-        discount_percentage: offer.discount_percentage ?? null,
-        discount_amount: offer.discount_amount ?? null,
+        discount_percentage: offer.discount_percentage ?? 0,
+        discount_amount:
+          offer.discount_amount != null
+            ? offer.discount_amount
+            : (offer.discount_percentage ?? 0),
         type: offer.type || 0,
         reference_id: offer.reference_id || 0,
         status: offer.status || 0,
