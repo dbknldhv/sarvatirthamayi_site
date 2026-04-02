@@ -36,23 +36,25 @@ const getOffers = async (req, res) => {
       );
     }
 
-    const formattedOffers = offers.map((item) => ({
-      id: item.sql_id || 0,
-      temple_id: item.temple_id || 0,
-      name: item.name || "",
-      description: item.description || "",
-      discount_percentage: item.discount_percentage ?? 0,
-      discount_amount:
-        item.discount_amount != null
-          ? item.discount_amount
-          : (item.discount_percentage ?? 0),
-      type: item.type || 0,
-      reference_id: item.reference_id || 0,
-      status: item.status || 0,
-      sequence: item.sequence || 0,
-      is_favorite: favoriteSet.has(Number(item.reference_id)) ? 1 : 0,
-      image: formatImageUrl(item.image),
-    }));
+    const formattedOffers = offers.map((o) => ({
+  id: parseInt(o.sql_id) || 0,
+  temple_id: o.temple_id || 0,
+  name: o.name || "",
+  description: o.description || "",
+
+  discount_percentage: Number(o.discount_percentage ?? 0),
+
+  discount_amount:
+    o.discount_amount != null
+      ? Number(o.discount_amount)
+      : Number(o.discount_percentage ?? 0),
+
+  type: o.type || 0,
+  reference_id: o.reference_id || 0,
+  is_favorite: favoriteOfferSet.has(Number(o.reference_id)) ? 1 : 0,
+  image: formatImageUrl(o.image),
+  image_thumb: formatImageUrl(o.image),
+}));
 
     const totalPages = totalCount > 0 ? Math.ceil(totalCount / perPage) : 1;
     const isNext = page < totalPages;
