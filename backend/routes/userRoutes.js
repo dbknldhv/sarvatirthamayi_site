@@ -33,9 +33,8 @@ router.post("/contact-us", contactController.contactUs);
 router.get("/home", protect, homeController.getHomeData);
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/about-us", aboutController.getAboutUs);
-router.get("/term-condition", termsController.getTermsAndConditions);
 router.get("/privacy-policy", privacyController.getPrivacyPolicy);
-
+router.get("/term-condition", termsController.getTermsAndConditions);
 router.get("/states", joinNowController.getPublicStates);
 //offer Zone
 router.get("/offers", offerController.getOffers);
