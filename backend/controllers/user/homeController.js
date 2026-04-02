@@ -1,5 +1,6 @@
 const Temple = require("../../models/Temple");
 const PurchasedMemberCard = require("../../models/PurchasedMemberCard");
+const Offer = require("../../models/Offer");
 const formatImageUrl = require("../../utils/imageUrl");
 
 exports.getHomeData = async (req, res) => {
@@ -24,6 +25,25 @@ exports.getHomeData = async (req, res) => {
       is_favorite: 0,
       image: formatImageUrl(t.image),
       image_thumb: formatImageUrl(t.image),
+    }));
+
+    // ===== Fetch Offer Zone Data =====
+    const offers = await Offer.find({ status: 1 })
+      .sort({ sequence: 1 })
+      .limit(5)
+      .lean();
+
+    const formattedOffers = offers.map((o) => ({
+      id: parseInt(o.sql_id) || 0,
+      temple_id: o.temple_id || 0,
+      name: o.name || "",
+      description: o.description || "",
+      discount_percentage: o.discount_percentage || 0,
+      discount_amount: o.discount_amount || null,
+      type: o.type || 0,
+      reference_id: o.reference_id || 0,
+      image: formatImageUrl(o.image),
+      image_thumb: formatImageUrl(o.image),
     }));
 
     return res.status(200).json({
@@ -58,7 +78,7 @@ exports.getHomeData = async (req, res) => {
 
         most_popular_temple: formattedTemples,
         trading_temple: formattedTemples,
-        offer_zone: [],
+        offer_zone: formattedOffers,
       },
     });
   } catch (error) {
