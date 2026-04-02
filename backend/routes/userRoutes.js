@@ -15,6 +15,8 @@ const contactController = require("../controllers/user/contactController");
 const termsController = require("../controllers/user/termsController"); 
 const privacyController = require("../controllers/user/privacyController");
 
+const offerController = require("../controllers/user/offerController");
+
 // --- 2. Import Middleware ---
 const { protect } = require("../middleware/authMiddleware");
 const upload = require("../middleware/uploadMiddleware");
@@ -35,6 +37,12 @@ router.get("/term-condition", termsController.getTermsAndConditions);
 router.get("/privacy-policy", privacyController.getPrivacyPolicy);
 
 router.get("/states", joinNowController.getPublicStates);
+//offer Zone
+router.get("/offers", offerController.getOffers);
+router.post("/offer/index", offerController.getOffers);
+router.post("/offer/show", offerController.getOfferById);
+router.get("/offers/:id", offerController.getOfferById);
+
 
 // --- Temple Public Routes ---
 router.get("/temple/index", joinNowController.getPublicTemples);
