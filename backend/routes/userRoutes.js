@@ -30,7 +30,7 @@ router.post("/contact-us", contactController.contactUs);
 router.get("/home", protect, homeController.getHomeData);
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/about-us", aboutController.getAboutUs);
-router.get("/terms-condition", termsController.getTermsAndConditions);
+router.get("/term-condition", termsController.getTermsAndConditions);
 
 router.get("/states", joinNowController.getPublicStates);
 
