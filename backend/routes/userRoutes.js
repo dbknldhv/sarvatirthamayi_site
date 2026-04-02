@@ -3,6 +3,9 @@ const router = express.Router();
 
 // --- 1. Import Controllers ---
 const aboutController = require("../controllers/user/aboutController");
+router.get("/terms-condition", termsController.getTermsAndConditions);
+
+
 const joinNowController = require("../controllers/user/join-nowController");
 const userController = require("../controllers/user/userController");
 const cardController = require("../controllers/user/membershipcardController");
@@ -29,6 +32,8 @@ router.post("/contact-us", contactController.contactUs);
 router.get("/home", protect, homeController.getHomeData);
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/about-us", aboutController.getAboutUs);
+router.get("/terms-condition", termsController.getTermsAndConditions);
+
 router.get("/states", joinNowController.getPublicStates);
 
 // --- Temple Public Routes ---
