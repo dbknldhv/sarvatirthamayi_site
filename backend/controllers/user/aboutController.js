@@ -82,7 +82,7 @@ exports.getAboutUs = async (req, res) => {
   try {
     return res.status(200).json({
       status: "true",
-      message: "Success",
+      message: "About us information retrieved successfully.",
       data: {
         about:
           "Sarvatirthamayi is a spiritual platform dedicated to connecting devotees with temples, rituals, sacred journeys, and devotional services through a seamless digital experience.",
