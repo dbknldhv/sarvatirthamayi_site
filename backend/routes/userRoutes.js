@@ -38,7 +38,7 @@ router.get("/term-condition", termsController.getTermsAndConditions);
 router.get("/states", joinNowController.getPublicStates);
 //offer Zone
 router.get("/offers", offerController.getOffers);
-router.post("/offer/index", offerController.getOffers);
+router.get("/offer/index", offerController.getOffers);
 router.post("/offer/show", offerController.getOfferById);
 router.get("/offers/:id", offerController.getOfferById);
 
