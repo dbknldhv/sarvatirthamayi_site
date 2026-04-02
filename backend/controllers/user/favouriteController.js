@@ -122,23 +122,16 @@ exports.favouriteGet = async (req, res) => {
     try {
         const userId = req.user?._id;
         const legacyId = 34;
-        const page = Math.max(parseInt(req.query.page) || 1, 1);
-        const perPage = parseInt(req.query.per_page) || 15;
-        const skip = (page - 1) * perPage;
 
-        // CRITICAL: Only add ObjectId to query if it's valid to prevent 500 error
-        const userFilters = [{ user_id: legacyId }];
-        if (mongoose.Types.ObjectId.isValid(userId)) {
-            userFilters.push({ user_id: userId });
-        }
+        // 🎯 USE A RAW ARRAY FOR FILTERING
+        const userIds = [legacyId];
+        if (userId) userIds.push(userId);
 
-        const query = { $or: userFilters };
+        const query = { user_id: { $in: userIds } }; // Simple "In" query works better with Mixed types
 
         const totalCount = await Favorite.countDocuments(query);
         const favorites = await Favorite.find(query)
             .sort({ created_at: -1 })
-            .skip(skip)
-            .limit(perPage)
             .lean();
 
         const mappedData = [];

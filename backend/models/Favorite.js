@@ -3,7 +3,8 @@ const mongoose = require("mongoose");
 const favoriteSchema = new mongoose.Schema(
   {
     sql_id: {
-      type: Number,
+      type: mongoose.Schema.Types.Mixed,
+      requried: true,
       index: true,
     },
     user_id: {
