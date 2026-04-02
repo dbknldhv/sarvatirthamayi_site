@@ -18,16 +18,24 @@ const getAuthUserObjectId = (req) => {
 };
 
 const getUserNumericId = async (req) => {
-  if (req.user?.sql_id) return Number(req.user.sql_id);
-  if (req.user?.user_id && !isNaN(Number(req.user.user_id))) {
-    return Number(req.user.user_id);
+  try {
+    if (req.user?.sql_id && !isNaN(Number(req.user.sql_id))) {
+      return Number(req.user.sql_id);
+    }
+
+    if (req.user?.user_id && !isNaN(Number(req.user.user_id))) {
+      return Number(req.user.user_id);
+    }
+
+    const authUserId = getAuthUserObjectId(req);
+    if (!authUserId) return 0;
+
+    const user = await User.findById(authUserId).select("sql_id").lean();
+    return Number(user?.sql_id || 0);
+  } catch (error) {
+    console.error("getUserNumericId error:", error);
+    return 0;
   }
-
-  const authUserId = getAuthUserObjectId(req);
-  if (!authUserId) return 0;
-
-  const user = await User.findById(authUserId).select("sql_id").lean();
-  return Number(user?.sql_id || 0);
 };
 
 const getNextSqlId = async () => {
@@ -60,9 +68,11 @@ const getOfferByReferenceId = async (referenceId) => {
 
 const resolveFavoriteTarget = async (referenceId, type) => {
   const refId = Number(referenceId);
-  if (!refId) return null;
+  const favType = Number(type);
 
-  if (Number(type) === 1) {
+  if (!refId || !favType) return null;
+
+  if (favType === 1) {
     const temple = await getTempleBySqlId(refId);
     if (!temple) return null;
 
@@ -77,7 +87,7 @@ const resolveFavoriteTarget = async (referenceId, type) => {
     };
   }
 
-  if (Number(type) === 2) {
+  if (favType === 2) {
     const ritual = await getRitualBySqlId(refId);
     if (!ritual) return null;
 
@@ -92,7 +102,7 @@ const resolveFavoriteTarget = async (referenceId, type) => {
     };
   }
 
-  if (Number(type) === 6) {
+  if (favType === 6) {
     const offer = await getOfferByReferenceId(refId);
     if (!offer) return null;
 
@@ -162,7 +172,7 @@ exports.favourite = async (req, res) => {
 
     const filter = {
       user_id: userId,
-      reference_id,
+      reference_id: Number(target.reference_id || reference_id),
       type,
     };
 
@@ -175,11 +185,22 @@ exports.favourite = async (req, res) => {
         await Favorite.create({
           sql_id,
           user_id: userId,
-          reference_id,
+          reference_id: Number(target.reference_id || reference_id),
           temple_id: Number(target.temple_id || 0),
           type,
           status: 1,
         });
+      } else if (Number(existing.status) !== 1) {
+        await Favorite.updateOne(
+          { _id: existing._id },
+          {
+            $set: {
+              status: 1,
+              temple_id: Number(target.temple_id || 0),
+              updated_at: new Date(),
+            },
+          }
+        );
       }
 
       return res.status(200).json({
@@ -238,7 +259,10 @@ exports.favouriteGet = async (req, res) => {
       });
     }
 
-    const query = { user_id: userId };
+    const query = {
+      user_id: userId,
+      status: 1,
+    };
 
     const totalCount = await Favorite.countDocuments(query);
 
@@ -269,7 +293,7 @@ exports.favouriteGet = async (req, res) => {
       });
     }
 
-    const totalPages = Math.max(Math.ceil(totalCount / perPage), 1);
+    const totalPages = totalCount > 0 ? Math.ceil(totalCount / perPage) : 0;
 
     return res.status(200).json({
       status: "success",
@@ -282,7 +306,7 @@ exports.favouriteGet = async (req, res) => {
         per_page: perPage,
         total_pages: totalPages,
         is_next: page < totalPages,
-        is_prev: page > 1,
+        is_prev: page > 1 && totalPages > 0,
         from: mappedData.length ? skip + 1 : 0,
         to: mappedData.length ? skip + mappedData.length : 0,
         next_page_url:
@@ -290,7 +314,7 @@ exports.favouriteGet = async (req, res) => {
             ? `${baseUrl}api/v1/favorite/index?page=${page + 1}&per_page=${perPage}`
             : null,
         prev_page_url:
-          page > 1
+          page > 1 && totalPages > 0
             ? `${baseUrl}api/v1/favorite/index?page=${page - 1}&per_page=${perPage}`
             : null,
         path: `${baseUrl}api/v1/favorite/index`,
