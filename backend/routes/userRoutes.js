@@ -3,9 +3,6 @@ const router = express.Router();
 
 // --- 1. Import Controllers ---
 const aboutController = require("../controllers/user/aboutController");
-router.get("/terms-condition", termsController.getTermsAndConditions);
-
-
 const joinNowController = require("../controllers/user/join-nowController");
 const userController = require("../controllers/user/userController");
 const cardController = require("../controllers/user/membershipcardController");
@@ -15,6 +12,7 @@ const userVoucherController = require("../controllers/user/userVoucherController
 const homeController = require("../controllers/user/homeController");
 const donationController = require("../controllers/user/donationController");
 const contactController = require("../controllers/user/contactController");
+const termsController = require("../controllers/user/termsController"); 
 
 // --- 2. Import Middleware ---
 const { protect } = require("../middleware/authMiddleware");
