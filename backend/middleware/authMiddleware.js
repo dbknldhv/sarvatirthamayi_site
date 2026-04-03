@@ -2,78 +2,102 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 /**
- * 🔒 PRODUCTION AUTH MIDDLEWARE
- * This version is designed to prevent "Cast to Number" crashes.
+ * 🔒 FINAL PRODUCTION AUTH MIDDLEWARE
+ * Solves: "Cast to Number" crashes, Old Tokens, and Missing DB fields.
  */
 exports.protect = async (req, res, next) => {
-  let token;
+    let token;
 
-  if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
-    try {
-      token = req.headers.authorization.split(" ")[1];
-      
-      // 1. Decode the token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // 1. Check for Bearer Token
+    if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
+        try {
+            token = req.headers.authorization.split(" ")[1];
 
-      // 2. Fetch only required fields from DB (Faster)
-      // We use .lean() to get a plain JSON object
-      const user = await User.findById(decoded.id)
-        .select("sql_id user_type role")
-        .lean();
+            // 2. Verify Token
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      if (!user) {
-        return res.status(401).json({ success: false, message: "User no longer exists" });
-      }
+            // 3. Fetch user from DB using the String ID (Lean for speed)
+            const user = await User.findById(decoded.id)
+                .select("sql_id user_type role first_name email")
+                .lean();
 
-      // 3. 🎯 THE CRITICAL FIX:
-      // We attach the user to req.user. 
-      // We MUST ensure sql_id is a Number. 
-      // If it's missing in DB, we try to get it from the token payload.
-      req.user = {
-        ...user,
-        id: user._id.toString(), // The string ID for lookups
-        sql_id: Number(user.sql_id || decoded.sql_id || 0) // THE NUMERIC ID
-      };
+            if (!user) {
+                return res.status(401).json({ 
+                    status: "false", 
+                    success: false, 
+                    message: "User account no longer exists." 
+                });
+            }
 
-      // Final Check: If sql_id is still NaN or 0, we have a problem with the account
-      if (!req.user.sql_id || isNaN(req.user.sql_id)) {
-          console.error("🛑 Auth Warning: User has no numeric sql_id. Token ID:", decoded.id);
-      }
+            /**
+             * 🎯 THE MENTAL PEACE FIX:
+             * We force the sql_id to be a Number.
+             * Order of priority: 
+             * a) User record in DB (as number)
+             * b) Decoded Token payload (as number)
+             * c) 0 (as a safe fallback to prevent NaN crashes)
+             */
+            const finalSqlId = Number(user.sql_id || decoded.sql_id || 0);
 
-      next();
-    } catch (error) {
-      console.error("🔥 Auth Middleware Error:", error.message);
-      const msg = error.name === "TokenExpiredError" ? "Session expired" : "Not authorized";
-      return res.status(401).json({ success: false, message: msg });
+            // 4. Attach Clean Object to Request
+            req.user = {
+                ...user,
+                _id: user._id.toString(), // Ensure MongoDB ID is a string
+                id: user._id.toString(),  // Alias for compatibility
+                sql_id: isNaN(finalSqlId) ? 0 : finalSqlId, // GUARANTEED NUMBER
+            };
+
+            // 5. Final validation - If it's still 0, log it but don't crash
+            if (req.user.sql_id === 0) {
+                console.warn(`⚠️ Warning: User ${decoded.id} has no numeric ID. Please re-login.`);
+            }
+
+            return next();
+
+        } catch (error) {
+            console.error("🔥 Auth Error:", error.message);
+            
+            // Handle specific JWT errors
+            let message = "Not authorized, token failed";
+            if (error.name === "TokenExpiredError") message = "Session expired. Please login again.";
+            if (error.name === "JsonWebTokenError") message = "Invalid token. Please login again.";
+
+            return res.status(401).json({ status: "false", success: false, message });
+        }
     }
-  }
 
-  if (!token) {
-    return res.status(401).json({ success: false, message: "No token provided" });
-  }
+    // 6. No Token provided
+    if (!token) {
+        return res.status(401).json({ 
+            status: "false", 
+            success: false, 
+            message: "Not authorized, no token found." 
+        });
+    }
 };
 
 /**
  * 2. Multi-Role Authorization
+ * Usage: router.get('/path', protect, authorize(1, 2))
  */
 exports.authorize = (...types) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: "Not authorized" });
-    }
+    return (req, res, next) => {
+        if (!req.user) return res.status(401).json({ success: false, message: "Unauthorized" });
 
-    // Convert both to numbers to be safe
-    const userType = Number(req.user.user_type);
-    if (!types.map(Number).includes(userType)) {
-      return res.status(403).json({
-        success: false,
-        message: `Access denied for user type ${userType}`,
-      });
-    }
-    next();
-  };
+        // Force numeric comparison
+        const currentUserType = Number(req.user.user_type);
+        const allowedTypes = types.map(Number);
+
+        if (!allowedTypes.includes(currentUserType)) {
+            return res.status(403).json({
+                status: "false",
+                success: false,
+                message: `Forbidden: Access denied for user type ${currentUserType}`
+            });
+        }
+        next();
+    };
 };
-
 /**
  * 3. Super Admin Only
  */
