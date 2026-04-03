@@ -101,6 +101,14 @@ exports.getRitualsByTemple = async (req, res) => {
     const source = { ...req.query, ...req.body };
     const templeId = getSourceValue(source, "temple_id", "templeId");
 
+    // 1. 🛡️ SAFE USER ID EXTRACTION
+    // If sql_id is missing, this results in null, not NaN.
+    const userId = Number(req.user?.sql_id || req.user?.user_id);
+    
+    if (!userId || isNaN(userId)) {
+      return sendError(res, 401, "Unauthorized: Numeric User ID missing.");
+    }
+
     if (!templeId) return sendError(res, 400, "temple_id is required");
 
     const temple = await Temple.findOne(buildTempleLookup(templeId)).lean();
@@ -115,8 +123,10 @@ exports.getRitualsByTemple = async (req, res) => {
 
     const ritualSqlIds = rituals.map((r) => Number(r.sql_id)).filter(Boolean);
 
+    // 2. 🎯 QUERY FAVORITES
+    // Now userId is guaranteed to be a valid Number here
     const favoriteDocs = await Favorite.find({
-      user_id: req.user._id || req.user.id,
+      user_id: userId, 
       type: 2,
       reference_id: { $in: ritualSqlIds },
     }).lean();
@@ -160,9 +170,13 @@ exports.getRitualsByTemple = async (req, res) => {
       },
     });
   } catch (error) {
+    // 3. 🚨 LOG THE SPECIFIC ERROR FOR DEBUGGING
+    console.error("Rituals API Error:", error.message);
     return sendError(res, 500, error.message);
   }
 };
+
+
 exports.getRitualShow = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };

@@ -7,8 +7,14 @@ const mongoose = require("mongoose");
 const baseUrl = "https://api.sarvatirthamayi.com/";
 
 /**
- * 🛠️ IMAGE HELPER
+ * 🔒 PRODUCTION GUARD: Validates numeric user ID
  */
+const getAuthUserId = (req) => {
+    // Priority 1: sql_id from token, Priority 2: user_id from token
+    const id = Number(req.user?.sql_id || req.user?.user_id);
+    return (isNaN(id) || id <= 0) ? null : id;
+};
+
 const formatImageUrl = (imgPath) => {
     if (!imgPath) return `${baseUrl}uploads/default.png`;
     if (String(imgPath).startsWith("http")) return imgPath;
@@ -16,17 +22,12 @@ const formatImageUrl = (imgPath) => {
     return `${baseUrl}${cleanPath.startsWith("/") ? cleanPath.slice(1) : cleanPath}`;
 };
 
-/**
- * 🎯 SMART METADATA RESOLVER
- * Supports both MongoDB _id (String) and sql_id (Number)
- */
 const resolveFavoriteTarget = async (referenceId, type) => {
     const favType = Number(type);
     const rawId = referenceId; 
 
     try {
         let targetDoc = null;
-
         if (favType === 1) { // Temple
             targetDoc = await Temple.findOne({
                 $or: [
@@ -35,9 +36,7 @@ const resolveFavoriteTarget = async (referenceId, type) => {
                 ],
                 status: 1
             }).lean();
-
             if (!targetDoc) return null;
-
             return {
                 id: Number(targetDoc.sql_id) || 0,
                 name: targetDoc.name || "",
@@ -56,9 +55,7 @@ const resolveFavoriteTarget = async (referenceId, type) => {
                 ],
                 status: 1
             }).populate("temple_id").lean();
-
             if (!targetDoc) return null;
-
             return {
                 id: Number(targetDoc.sql_id) || 0,
                 name: targetDoc.name || "",
@@ -68,58 +65,24 @@ const resolveFavoriteTarget = async (referenceId, type) => {
                 type_str: "Ritual"
             };
         }
-
-        if (favType === 6) { // Offer
-            targetDoc = await Offer.findOne({
-                reference_id: isNaN(Number(rawId)) ? -1 : Number(rawId),
-                status: 1
-            }).lean();
-
-            if (!targetDoc) return null;
-
-            return {
-                id: Number(targetDoc.reference_id),
-                name: targetDoc.name || "Special Offer",
-                description: targetDoc.description || "",
-                image: targetDoc.image || "",
-                temple_name: "Offer Zone",
-                type_str: "Offer"
-            };
-        }
-
         return null;
     } catch (e) {
-        console.error("Smart Resolve Error:", e.message);
         return null;
     }
 };
 
-/**
- * 1. Toggle Favourite (Add/Remove)
- */
 exports.favourite = async (req, res) => {
     try {
-        // Extract numeric ID from session or use legacy fallback 34
-        const userId = Number(req.user?.sql_id || 34); 
+        const userId = getAuthUserId(req);
+        if (!userId) return res.status(401).json({ status: "error", message: "Unauthorized" });
+
         const { reference_id, type, action } = req.body;
+        if (!reference_id || !type) return res.status(400).json({ status: "error", message: "Missing fields" });
 
-        if (!reference_id || !type) {
-            return res.status(400).json({ status: "error", success: false, message: "Missing reference_id or type" });
-        }
-
-        // Use the smart resolver to get the correct numeric reference_id
         const target = await resolveFavoriteTarget(reference_id, type);
-        if (!target) {
-            return res.status(404).json({ status: "error", success: false, message: "Favourite target not found" });
-        }
+        if (!target) return res.status(404).json({ status: "error", message: "Target not found" });
 
-        const normalizedRefId = Number(target.id);
-
-        const filter = {
-            user_id: userId,
-            reference_id: normalizedRefId,
-            type: Number(type)
-        };
+        const filter = { user_id: userId, reference_id: Number(target.id), type: Number(type) };
 
         if (Number(action) === 1) {
             const existing = await Favorite.findOne(filter).lean();
@@ -128,11 +91,9 @@ exports.favourite = async (req, res) => {
                 await Favorite.create({
                     sql_id: (lastDoc?.sql_id || 0) + 1,
                     user_id: userId,
-                    reference_id: normalizedRefId,
+                    reference_id: Number(target.id),
                     type: Number(type),
-                    status: 1,
-                    created_at: new Date(),
-                    updated_at: new Date()
+                    status: 1
                 });
             }
             return res.status(200).json({ status: "success", success: true, message: "Favourite added successfully" });
@@ -141,29 +102,22 @@ exports.favourite = async (req, res) => {
             return res.status(200).json({ status: "success", success: true, message: "Favourite removed successfully" });
         }
     } catch (error) {
-        console.error("Favourite Toggle API Error:", error.message);
-        return res.status(500).json({ status: "error", success: false, message: error.message });
+        return res.status(500).json({ status: "error", message: error.message });
     }
 };
 
-/**
- * 2. Get Favourite List (Pagination)
- */
 exports.favouriteGet = async (req, res) => {
     try {
-        const userId = Number(req.user?.sql_id || 34);
+        const userId = getAuthUserId(req);
+        if (!userId) return res.status(401).json({ status: "error", message: "Unauthorized" });
+
         const page = Math.max(Number(req.query.page) || 1, 1);
         const perPage = Math.max(Number(req.query.per_page) || 10, 1);
         const skip = (page - 1) * perPage;
 
         const query = { user_id: userId, status: 1 };
         const totalCount = await Favorite.countDocuments(query);
-        
-        const favorites = await Favorite.find(query)
-            .sort({ created_at: -1 })
-            .skip(skip)
-            .limit(perPage)
-            .lean();
+        const favorites = await Favorite.find(query).sort({ created_at: -1 }).skip(skip).limit(perPage).lean();
 
         const mappedData = [];
         for (const fav of favorites) {
@@ -186,7 +140,6 @@ exports.favouriteGet = async (req, res) => {
         }
 
         const totalPages = Math.max(Math.ceil(totalCount / perPage), 1);
-
         return res.status(200).json({
             status: "success",
             success: true,
@@ -203,19 +156,11 @@ exports.favouriteGet = async (req, res) => {
             }
         });
     } catch (error) {
-        console.error("Favourite Get API Error:", error.message);
         return res.status(200).json({
             status: "error",
             success: false,
             message: error.message,
-            data: { 
-                data: [], 
-                total_count: 0, 
-                current_page: 1, 
-                total_pages: 0,
-                is_next: false,
-                is_prev: false
-            }
+            data: { data: [], total_count: 0, current_page: 1, total_pages: 0 }
         });
     }
 };
