@@ -82,26 +82,37 @@ const resolveFavoriteTarget = async (referenceId, type) => {
   }
 };
 
-/**
- * Add / Remove Favourite
- */
 exports.favourite = async (req, res) => {
   try {
 
     const userId = getAuthUserId(req);
+
     if (!userId) {
-      return res.status(401).json({ status: "error", message: "Unauthorized" });
+      return res.status(401).json({
+        status: "error",
+        success: false,
+        message: "Unauthorized"
+      });
     }
 
     const { reference_id, type, action } = req.body;
 
     if (!reference_id || !type) {
-      return res.status(400).json({ status: "error", message: "Missing fields" });
+      return res.status(400).json({
+        status: "error",
+        success: false,
+        message: "Missing fields"
+      });
     }
 
     const target = await resolveFavoriteTarget(reference_id, type);
+
     if (!target) {
-      return res.status(404).json({ status: "error", message: "Target not found" });
+      return res.status(404).json({
+        status: "error",
+        success: false,
+        message: "Target not found"
+      });
     }
 
     const filter = {
@@ -126,6 +137,7 @@ exports.favourite = async (req, res) => {
           type: Number(type),
           status: 1
         });
+
       }
 
       return res.status(200).json({
@@ -143,14 +155,19 @@ exports.favourite = async (req, res) => {
         success: true,
         message: "Favourite removed successfully"
       });
+
     }
 
   } catch (error) {
+
+    console.error("Favourite error:", error);
+
     return res.status(500).json({
       status: "error",
       success: false,
       message: error.message
     });
+
   }
 };
 
