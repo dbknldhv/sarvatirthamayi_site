@@ -52,9 +52,8 @@ favoriteSchema.index(
   { unique: true }
 );
 
-favoriteSchema.pre("save", function (next) {
+favoriteSchema.pre("save", function () {
   this.updated_at = new Date();
-  next(); // Always call next() in a non-async pre-hook to prevent hanging
 });
 
 module.exports =
