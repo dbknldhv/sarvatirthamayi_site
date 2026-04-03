@@ -4,8 +4,10 @@ const crypto = require("crypto");
 
 const Ritual = require("../../models/Ritual");
 const RitualPackage = require("../../models/RitualPackage");
-const RitualBooking = mongoose.models.RitualBooking || require("../../models/RitualBooking");
+const RitualBooking =
+  mongoose.models.RitualBooking || require("../../models/RitualBooking");
 const Temple = mongoose.models.Temple || require("../../models/Temple");
+const User = mongoose.models.User || require("../../models/User");
 const formatImageUrl = require("../../utils/imageUrl");
 const Favorite = require("../../models/Favorite");
 
@@ -34,7 +36,11 @@ const toNumberOrNull = (value) => {
 
 const getSourceValue = (source, ...keys) => {
   for (const key of keys) {
-    if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
+    if (
+      source[key] !== undefined &&
+      source[key] !== null &&
+      source[key] !== ""
+    ) {
       return source[key];
     }
   }
@@ -96,29 +102,46 @@ const buildPackageLookup = (packageId) => {
   };
 };
 
+/**
+ * Resolve logged-in user numeric SQL ID safely.
+ * Priority:
+ * 1. req.user.sql_id
+ * 2. req.user.user_id
+ * 3. fetch from DB using req.user._id / req.user.id
+ */
+const getAuthUserSqlId = async (req) => {
+  const directSqlId = Number(req.user?.sql_id || req.user?.user_id);
+  if (!Number.isNaN(directSqlId) && directSqlId > 0) {
+    return directSqlId;
+  }
+
+  const mongoUserId = req.user?._id || req.user?.id;
+  if (mongoUserId && mongoose.isValidObjectId(String(mongoUserId))) {
+    const dbUser = await User.findById(mongoUserId).select("sql_id").lean();
+    const dbSqlId = Number(dbUser?.sql_id);
+    if (!Number.isNaN(dbSqlId) && dbSqlId > 0) {
+      return dbSqlId;
+    }
+  }
+
+  return 0;
+};
+
 exports.getRitualsByTemple = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
     const templeId = getSourceValue(source, "temple_id", "templeId");
-
-    /**
-     * 1. 🛡️ THE CRITICAL FIX: Extract sql_id and force to Number.
-     * If the token is old or sql_id is missing, it defaults to 0.
-     * This prevents passing "NaN" or "ObjectId String" to a numeric DB field.
-     */
-    const userId = Number(req.user?.sql_id) || 0;
+    const userSqlId = await getAuthUserSqlId(req);
 
     if (!templeId) {
       return sendError(res, 400, "temple_id is required");
     }
 
-    // Find the temple using the helper
     const temple = await Temple.findOne(buildTempleLookup(templeId)).lean();
     if (!temple) {
       return sendError(res, 404, "Temple not found");
     }
 
-    // Fetch rituals belonging to this temple
     const rituals = await Ritual.find({
       temple_id: temple._id,
       status: 1,
@@ -126,25 +149,20 @@ exports.getRitualsByTemple = async (req, res) => {
       .sort({ sequence: 1, created_at: -1 })
       .lean();
 
-    // Map the numeric SQL IDs of the rituals for the favorite check
     const ritualSqlIds = rituals.map((r) => Number(r.sql_id)).filter(Boolean);
 
-    /**
-     * 2. 🎯 CRASH PROTECTION: Only query Favorites if userId is valid.
-     * If userId is 0 (old token), we skip this to avoid the 500 error.
-     */
     let favoriteSet = new Set();
-    if (userId > 0) {
+    if (userSqlId > 0 && ritualSqlIds.length > 0) {
       const favoriteDocs = await Favorite.find({
-        user_id: userId, // Guaranteed to be a Number (e.g., 131)
-        type: 2,         // Type 2 = Ritual
+        user_id: userSqlId,
+        type: 2,
         reference_id: { $in: ritualSqlIds },
+        status: 1,
       }).lean();
 
       favoriteSet = new Set(favoriteDocs.map((f) => Number(f.reference_id)));
     }
 
-    // Format data for Flutter/React
     const formatted = rituals.map((ritual) => ({
       id: Number(ritual.sql_id) || 0,
       name: String(ritual.name || ""),
@@ -153,7 +171,7 @@ exports.getRitualsByTemple = async (req, res) => {
       temple_name: String(temple.name || ""),
       image: formatImageUrl(ritual.image),
       image_thumb: formatImageUrl(ritual.image),
-      devotees_booked_count: 0, // Placeholder as per your original logic
+      devotees_booked_count: 0,
       is_favorite: favoriteSet.has(Number(ritual.sql_id)) ? 1 : 0,
       address: buildTempleAddress(temple),
     }));
@@ -181,17 +199,16 @@ exports.getRitualsByTemple = async (req, res) => {
     });
   } catch (error) {
     console.error("🔥 Ritual List Error:", error.message);
-    // Return a graceful error response instead of crashing the app
     return sendError(res, 500, "Internal Server Error");
   }
 };
-
 
 exports.getRitualShow = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
     const ritualId = getSourceValue(source, "ritual_id", "ritualId");
     const requestedTempleId = getSourceValue(source, "temple_id", "templeId");
+    const userSqlId = await getAuthUserSqlId(req);
 
     if (!ritualId) return sendError(res, 400, "ritual_id is required");
 
@@ -204,7 +221,10 @@ exports.getRitualShow = async (req, res) => {
 
     let temple = null;
 
-    if (ritual.temple_id && mongoose.Types.ObjectId.isValid(String(ritual.temple_id))) {
+    if (
+      ritual.temple_id &&
+      mongoose.Types.ObjectId.isValid(String(ritual.temple_id))
+    ) {
       temple = await Temple.findOne({
         _id: ritual.temple_id,
         status: 1,
@@ -237,11 +257,15 @@ exports.getRitualShow = async (req, res) => {
       Number(requestedTempleId || 0) ||
       0;
 
-    const favouriteExists = await Favorite.exists({
-      user_id: req.user._id || req.user.id,
-      reference_id: Number(ritual.sql_id) || 0,
-      type: 2,
-    });
+    let favouriteExists = false;
+    if (userSqlId > 0) {
+      favouriteExists = !!(await Favorite.exists({
+        user_id: userSqlId,
+        reference_id: Number(ritual.sql_id) || 0,
+        type: 2,
+        status: 1,
+      }));
+    }
 
     return res.status(200).json({
       status: "true",
@@ -258,8 +282,16 @@ exports.getRitualShow = async (req, res) => {
         devotees_booked_count: 0,
         is_favorite: favouriteExists ? 1 : 0,
         address: {
-          full_address: [temple?.address_line1, temple?.address_line2, temple?.city_name, temple?.state_name, temple?.pincode]
-            .filter((v) => v !== null && v !== undefined && String(v).trim() !== "")
+          full_address: [
+            temple?.address_line1,
+            temple?.address_line2,
+            temple?.city_name,
+            temple?.state_name,
+            temple?.pincode,
+          ]
+            .filter(
+              (v) => v !== null && v !== undefined && String(v).trim() !== ""
+            )
             .join(", "),
           address_line1: String(temple?.address_line1 || ""),
           address_line2: String(temple?.address_line2 || ""),
@@ -282,7 +314,6 @@ exports.getRitualShow = async (req, res) => {
 exports.getRitualPackages = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
-
     const ritualId = getSourceValue(source, "ritual_id", "ritualId");
 
     if (!ritualId) return sendError(res, 400, "ritual_id is required");
@@ -303,16 +334,17 @@ exports.getRitualPackages = async (req, res) => {
 
     const ritualTempleId = Number(ritual.temple_id || ritual.templeId || 0);
 
-const formatted = packages.map((pkg) => ({
-  id: Number(pkg.sql_id) || 0,
-  ritual_id: Number(ritual.sql_id) || 0,
-  temple_id: ritualTempleId,
-  name: String(pkg.name || ""),
-  description: String(pkg.description || ""),
-  devotees_count: Number(pkg.devotees_count || 1),
-  price: String(pkg.price || 0),
-  offer_price: String(pkg.offer_price || pkg.price || 0),
-}));
+    const formatted = packages.map((pkg) => ({
+      id: Number(pkg.sql_id) || 0,
+      ritual_id: Number(ritual.sql_id) || 0,
+      temple_id: ritualTempleId,
+      name: String(pkg.name || ""),
+      description: String(pkg.description || ""),
+      devotees_count: Number(pkg.devotees_count || 1),
+      price: String(pkg.price || 0),
+      offer_price: String(pkg.offer_price || pkg.price || 0),
+    }));
+
     return res.status(200).json({
       status: "true",
       success: true,
@@ -326,22 +358,41 @@ const formatted = packages.map((pkg) => ({
   }
 };
 
-
 exports.createRitualOrder = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
 
     const templeId = getSourceValue(source, "temple_id", "templeId");
     const ritualId = getSourceValue(source, "ritual_id", "ritualId");
-    const ritualPackageId = getSourceValue(source, "ritual_package_id", "ritualPackageId");
+    const ritualPackageId = getSourceValue(
+      source,
+      "ritual_package_id",
+      "ritualPackageId"
+    );
     const date = getSourceValue(source, "date");
-    const whatsAppNumber = getSourceValue(source, "whatsAppNumber", "whatsapp_number");
-    const devoteeName = getSourceValue(source, "devoteeName", "devotees_name");
+    const whatsAppNumber = getSourceValue(
+      source,
+      "whatsAppNumber",
+      "whatsapp_number"
+    );
+    const devoteeName = getSourceValue(
+      source,
+      "devoteeName",
+      "devotees_name"
+    );
     const wish = getSourceValue(source, "wish") || "";
     const offerId = getSourceValue(source, "offerId", "offer_id");
-    const paymentType = toNumberOrNull(getSourceValue(source, "paymentType", "payment_type")) || 2;
+    const paymentType =
+      toNumberOrNull(getSourceValue(source, "paymentType", "payment_type")) || 2;
 
-    if (!templeId || !ritualId || !ritualPackageId || !date || !whatsAppNumber || !devoteeName) {
+    if (
+      !templeId ||
+      !ritualId ||
+      !ritualPackageId ||
+      !date ||
+      !whatsAppNumber ||
+      !devoteeName
+    ) {
       return sendError(res, 400, "Required booking fields are missing");
     }
 
@@ -398,36 +449,38 @@ exports.createRitualOrder = async (req, res) => {
       created_at: new Date(),
       updated_at: new Date(),
     });
-  return res.status(200).json({
-  status: "true",
-  success: true,
-  message: FLUTTER_MESSAGES.ritualBookingSuccess,
-  data: {
-    id: Number(booking.sql_id || 0),
-    user_id: 0,
-    temple_id: Number(templeDoc.sql_id || 0),
-    ritual_id: Number(ritualDoc.sql_id || 0),
-    ritual_package_id: Number(packageDoc.sql_id || 0),
-    date: booking.date ? booking.date.toISOString() : new Date().toISOString(),
-    whatsapp_number: String(booking.whatsapp_number || ""),
-    devotees_name: String(booking.devotees_name || ""),
-    wish: String(booking.wish || ""),
-    booking_status: Number(booking.booking_status || 1),
-    offer_discount_amount: String(booking.offer_discount_amount || 0),
-    original_amount: String(booking.original_amount || 0),
-    paid_amount: String(booking.paid_amount || 0),
-    offer_id: booking.offer_id ?? null,
-    payment: {
-      razorpay_order_id: String(order.id || ""),
-      razorpay_payment_id: "",
-      razorpay_public_key: String(process.env.RAZORPAY_KEY_ID || ""),
-      payment_status: Number(booking.payment_status || 1),
-      payment_type: Number(booking.payment_type || 2),
-      payment_date: ""
-    }
-  }
-});
 
+    return res.status(200).json({
+      status: "true",
+      success: true,
+      message: FLUTTER_MESSAGES.ritualBookingSuccess,
+      data: {
+        id: Number(booking.sql_id || 0),
+        user_id: 0,
+        temple_id: Number(templeDoc.sql_id || 0),
+        ritual_id: Number(ritualDoc.sql_id || 0),
+        ritual_package_id: Number(packageDoc.sql_id || 0),
+        date: booking.date
+          ? booking.date.toISOString()
+          : new Date().toISOString(),
+        whatsapp_number: String(booking.whatsapp_number || ""),
+        devotees_name: String(booking.devotees_name || ""),
+        wish: String(booking.wish || ""),
+        booking_status: Number(booking.booking_status || 1),
+        offer_discount_amount: String(booking.offer_discount_amount || 0),
+        original_amount: String(booking.original_amount || 0),
+        paid_amount: String(booking.paid_amount || 0),
+        offer_id: booking.offer_id ?? null,
+        payment: {
+          razorpay_order_id: String(order.id || ""),
+          razorpay_payment_id: "",
+          razorpay_public_key: String(process.env.RAZORPAY_KEY_ID || ""),
+          payment_status: Number(booking.payment_status || 1),
+          payment_type: Number(booking.payment_type || 2),
+          payment_date: "",
+        },
+      },
+    });
   } catch (error) {
     return sendError(res, 500, error.message);
   }
@@ -520,6 +573,8 @@ exports.verifyRitualBooking = async (req, res) => {
 
 exports.getMyRitualBookings = async (req, res) => {
   try {
+    const userSqlId = await getAuthUserSqlId(req);
+
     const bookings = await RitualBooking.find({ user_id: req.user.id })
       .populate("temple_id", "name image sql_id")
       .populate("ritual_id", "name description image sql_id")
@@ -531,15 +586,18 @@ exports.getMyRitualBookings = async (req, res) => {
       .map((booking) => Number(booking.ritual_id?.sql_id || 0))
       .filter(Boolean);
 
-    const favoriteDocs = await Favorite.find({
-      user_id: req.user._id || req.user.id,
-      type: 2,
-      reference_id: { $in: ritualIds },
-    }).lean();
+    let favoriteSet = new Set();
 
-    const favoriteSet = new Set(
-      favoriteDocs.map((f) => Number(f.reference_id))
-    );
+    if (userSqlId > 0 && ritualIds.length > 0) {
+      const favoriteDocs = await Favorite.find({
+        user_id: userSqlId,
+        type: 2,
+        reference_id: { $in: ritualIds },
+        status: 1,
+      }).lean();
+
+      favoriteSet = new Set(favoriteDocs.map((f) => Number(f.reference_id)));
+    }
 
     const formatted = bookings.map((booking) => ({
       id: Number(booking.sql_id || 0),
@@ -554,7 +612,9 @@ exports.getMyRitualBookings = async (req, res) => {
             description: String(booking.ritual_id.description || ""),
             image: formatImageUrl(booking.ritual_id.image || ""),
             image_thumb: formatImageUrl(booking.ritual_id.image || ""),
-            is_favorite: favoriteSet.has(Number(booking.ritual_id.sql_id)) ? 1 : 0,
+            is_favorite: favoriteSet.has(Number(booking.ritual_id.sql_id))
+              ? 1
+              : 0,
           }
         : null,
     }));
