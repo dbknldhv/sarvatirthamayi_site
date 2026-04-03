@@ -101,39 +101,31 @@ exports.getRitualsByTemple = async (req, res) => {
     const source = { ...req.query, ...req.body };
     const templeId = getSourceValue(source, "temple_id", "templeId");
 
-    // 1. 🛡️ SAFE USER ID EXTRACTION
-    // If sql_id is missing, this results in null, not NaN.
-    const userId = Number(req.user?.sql_id || req.user?.user_id);
-    
-    if (!userId || isNaN(userId)) {
-      return sendError(res, 401, "Unauthorized: Numeric User ID missing.");
-    }
+    // 🛡️ PRODUCTION GUARD: Strictly extract sql_id
+    // We only use sql_id because user_id in the Favorite schema is a Number
+    const userId = Number(req.user?.sql_id);
 
     if (!templeId) return sendError(res, 400, "temple_id is required");
 
     const temple = await Temple.findOne(buildTempleLookup(templeId)).lean();
     if (!temple) return sendError(res, 404, "Temple not found");
 
-    const rituals = await Ritual.find({
-      temple_id: temple._id,
-      status: 1,
-    })
+    const rituals = await Ritual.find({ temple_id: temple._id, status: 1 })
       .sort({ sequence: 1, created_at: -1 })
       .lean();
 
     const ritualSqlIds = rituals.map((r) => Number(r.sql_id)).filter(Boolean);
 
-    // 2. 🎯 QUERY FAVORITES
-    // Now userId is guaranteed to be a valid Number here
-    const favoriteDocs = await Favorite.find({
-      user_id: userId, 
-      type: 2,
-      reference_id: { $in: ritualSqlIds },
-    }).lean();
-
-    const favoriteSet = new Set(
-      favoriteDocs.map((f) => Number(f.reference_id))
-    );
+    // 🎯 QUERY FAVORITES: Only if we have a valid numeric userId
+    let favoriteSet = new Set();
+    if (userId && !isNaN(userId)) {
+      const favoriteDocs = await Favorite.find({
+        user_id: userId, 
+        type: 2,
+        reference_id: { $in: ritualSqlIds },
+      }).lean();
+      favoriteSet = new Set(favoriteDocs.map((f) => Number(f.reference_id)));
+    }
 
     const formatted = rituals.map((ritual) => ({
       id: Number(ritual.sql_id) || 0,
@@ -143,7 +135,6 @@ exports.getRitualsByTemple = async (req, res) => {
       temple_name: String(temple.name || ""),
       image: formatImageUrl(ritual.image),
       image_thumb: formatImageUrl(ritual.image),
-      devotees_booked_count: 0,
       is_favorite: favoriteSet.has(Number(ritual.sql_id)) ? 1 : 0,
       address: buildTempleAddress(temple),
     }));
@@ -159,19 +150,11 @@ exports.getRitualsByTemple = async (req, res) => {
         is_prev: false,
         total_pages: 1,
         current_page: 1,
-        per_page: formatted.length,
-        from: formatted.length ? 1 : 0,
-        to: formatted.length,
-        next_page_url: null,
-        prev_page_url: null,
-        path: req.originalUrl,
-        has_pages: false,
-        links: [],
+        per_page: formatted.length
       },
     });
   } catch (error) {
-    // 3. 🚨 LOG THE SPECIFIC ERROR FOR DEBUGGING
-    console.error("Rituals API Error:", error.message);
+    console.error("🔥 Ritual List Error:", error.message);
     return sendError(res, 500, error.message);
   }
 };
