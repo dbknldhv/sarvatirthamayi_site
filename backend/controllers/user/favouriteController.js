@@ -84,14 +84,13 @@ const resolveFavoriteTarget = async (referenceId, type) => {
 
 exports.favourite = async (req, res) => {
   try {
-
-    const userId = getAuthUserId(req);
+    const userId = Number(req.user?.sql_id || 0);
 
     if (!userId) {
       return res.status(401).json({
         status: "error",
         success: false,
-        message: "Unauthorized"
+        message: "Unauthorized",
       });
     }
 
@@ -101,75 +100,57 @@ exports.favourite = async (req, res) => {
       return res.status(400).json({
         status: "error",
         success: false,
-        message: "Missing fields"
-      });
-    }
-
-    const target = await resolveFavoriteTarget(reference_id, type);
-
-    if (!target) {
-      return res.status(404).json({
-        status: "error",
-        success: false,
-        message: "Target not found"
+        message: "Missing fields",
       });
     }
 
     const filter = {
       user_id: userId,
-      reference_id: Number(target.id),
-      type: Number(type)
+      reference_id: Number(reference_id),
+      type: Number(type),
     };
 
     if (Number(action) === 1) {
-
       const existing = await Favorite.findOne(filter).lean();
 
       if (!existing) {
-
-        const lastDoc = await Favorite.findOne().sort({ sql_id: -1 }).lean();
+        const last = await Favorite.findOne().sort({ sql_id: -1 }).lean();
 
         await Favorite.create({
-          sql_id: (lastDoc?.sql_id || 0) + 1,
+          sql_id: (last?.sql_id || 0) + 1,
           user_id: userId,
-          reference_id: Number(target.id),
-          temple_id: Number(target.temple_id),
+          reference_id: Number(reference_id),
+          temple_id: Number(reference_id),
           type: Number(type),
-          status: 1
+          status: 1,
         });
-
       }
 
       return res.status(200).json({
         status: "success",
         success: true,
-        message: "Favourite added successfully"
+        message: "Favourite added successfully",
       });
-
     } else {
-
       await Favorite.deleteOne(filter);
 
       return res.status(200).json({
         status: "success",
         success: true,
-        message: "Favourite removed successfully"
+        message: "Favourite removed successfully",
       });
-
     }
-
   } catch (error) {
-
-    console.error("Favourite error:", error);
+    console.error("Favourite Error:", error);
 
     return res.status(500).json({
       status: "error",
       success: false,
-      message: error.message
+      message: error.message,
     });
-
   }
 };
+
 
 /**
  * Get Favourite List
