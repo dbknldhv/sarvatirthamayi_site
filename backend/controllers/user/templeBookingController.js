@@ -76,6 +76,11 @@ exports.createTempleBookingOrder = async (req, res) => {
         
         await newBooking.save();
 
+        // 🎯 IMAGE HELPER for Mobile App
+        const fullImageUrl = temple.image 
+            ? (temple.image.startsWith('http') ? temple.image : `https://api.sarvatirthamayi.com/${temple.image.replace(/\\/g, '/')}`)
+            : "https://api.sarvatirthamayi.com/uploads/default.png";
+
         // --- 5. MOBILE APP ALIGNMENT ---
         return res.status(200).json({
             status: "true",
