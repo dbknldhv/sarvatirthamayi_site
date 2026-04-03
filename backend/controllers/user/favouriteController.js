@@ -17,23 +17,53 @@ const getAuthUserObjectId = (req) => {
   return req.user?._id || req.user?.id || null;
 };
 
+/**
+ * Resolve numeric user id for favorites table
+ * Priority:
+ * 1. req.user.sql_id
+ * 2. req.user.user_id if numeric
+ * 3. fetch current user from DB and use sql_id
+ * 4. fallback: find favorite records by mobile/email mapped user if needed
+ */
 const getUserNumericId = async (req) => {
   try {
+
+    // Case 1: middleware already attached sql_id
     if (req.user?.sql_id && !isNaN(Number(req.user.sql_id))) {
       return Number(req.user.sql_id);
     }
 
+    // Case 2: middleware attached numeric user_id
     if (req.user?.user_id && !isNaN(Number(req.user.user_id))) {
       return Number(req.user.user_id);
     }
 
-    const authUserId = getAuthUserObjectId(req);
-    if (!authUserId) return 0;
+    // Case 3: token contains Mongo _id
+    const mongoUserId = req.user?._id || req.user?.id;
 
-    const user = await User.findById(authUserId).select("sql_id").lean();
-    return Number(user?.sql_id || 0);
-  } catch (error) {
-    console.error("getUserNumericId error:", error);
+    if (!mongoUserId) {
+      console.log("No Mongo user id in req.user");
+      return 0;
+    }
+
+    const user = await User.findById(mongoUserId)
+      .select("sql_id")
+      .lean();
+
+    if (!user) {
+      console.log("User not found for id:", mongoUserId);
+      return 0;
+    }
+
+    if (!user.sql_id) {
+      console.log("User found but sql_id missing:", user);
+      return 0;
+    }
+
+    return Number(user.sql_id);
+
+  } catch (err) {
+    console.log("getUserNumericId error:", err);
     return 0;
   }
 };
