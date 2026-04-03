@@ -2,8 +2,8 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 /**
- * 1. Base Protection Middleware
- * Optimized to prevent database overhead and ensure sql_id availability
+ * 🔒 PRODUCTION AUTH MIDDLEWARE
+ * This version is designed to prevent "Cast to Number" crashes.
  */
 exports.protect = async (req, res, next) => {
   let token;
@@ -11,41 +11,45 @@ exports.protect = async (req, res, next) => {
   if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
     try {
       token = req.headers.authorization.split(" ")[1];
+      
+      // 1. Decode the token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      /**
-       * 🎯 PROD OPTIMIZATION:
-       * Instead of fetching the WHOLE user object every single time (slow),
-       * we fetch only the ID, sql_id, and user_type. 
-       * We use .lean() to make it a plain JS object (faster).
-       */
-      req.user = await User.findById(decoded.id)
+      // 2. Fetch only required fields from DB (Faster)
+      // We use .lean() to get a plain JSON object
+      const user = await User.findById(decoded.id)
         .select("sql_id user_type role")
         .lean();
 
-      if (!req.user) {
+      if (!user) {
         return res.status(401).json({ success: false, message: "User no longer exists" });
       }
 
-      /**
-       * 🎯 CAST ERROR PREVENTER:
-       * We ensure sql_id is attached to req.user. If it's missing in DB 
-       * but present in decoded token, we use the token value as backup.
-       */
-      req.user.sql_id = req.user.sql_id || decoded.sql_id;
+      // 3. 🎯 THE CRITICAL FIX:
+      // We attach the user to req.user. 
+      // We MUST ensure sql_id is a Number. 
+      // If it's missing in DB, we try to get it from the token payload.
+      req.user = {
+        ...user,
+        id: user._id.toString(), // The string ID for lookups
+        sql_id: Number(user.sql_id || decoded.sql_id || 0) // THE NUMERIC ID
+      };
+
+      // Final Check: If sql_id is still NaN or 0, we have a problem with the account
+      if (!req.user.sql_id || isNaN(req.user.sql_id)) {
+          console.error("🛑 Auth Warning: User has no numeric sql_id. Token ID:", decoded.id);
+      }
 
       next();
     } catch (error) {
       console.error("🔥 Auth Middleware Error:", error.message);
-      return res.status(401).json({ 
-        success: false, 
-        message: error.name === "TokenExpiredError" ? "Session expired" : "Not authorized" 
-      });
+      const msg = error.name === "TokenExpiredError" ? "Session expired" : "Not authorized";
+      return res.status(401).json({ success: false, message: msg });
     }
   }
 
   if (!token) {
-    return res.status(401).json({ success: false, message: "Not authorized, no token provided" });
+    return res.status(401).json({ success: false, message: "No token provided" });
   }
 };
 
