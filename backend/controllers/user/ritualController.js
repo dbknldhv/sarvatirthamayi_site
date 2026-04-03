@@ -102,13 +102,6 @@ const buildPackageLookup = (packageId) => {
   };
 };
 
-/**
- * Resolve logged-in user numeric SQL ID safely.
- * Priority:
- * 1. req.user.sql_id
- * 2. req.user.user_id
- * 3. fetch from DB using req.user._id / req.user.id
- */
 const getAuthUserSqlId = async (req) => {
   const directSqlId = Number(req.user?.sql_id || req.user?.user_id);
   if (!Number.isNaN(directSqlId) && directSqlId > 0) {
@@ -156,8 +149,8 @@ exports.getRitualsByTemple = async (req, res) => {
       const favoriteDocs = await Favorite.find({
         user_id: userSqlId,
         type: 2,
-        reference_id: { $in: ritualSqlIds },
         status: 1,
+        reference_id: { $in: ritualSqlIds },
       }).lean();
 
       favoriteSet = new Set(favoriteDocs.map((f) => Number(f.reference_id)));
@@ -198,8 +191,8 @@ exports.getRitualsByTemple = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("🔥 Ritual List Error:", error.message);
-    return sendError(res, 500, "Internal Server Error");
+    console.error("🔥 Ritual List Error:", error);
+    return sendError(res, 500, error.message);
   }
 };
 
@@ -349,9 +342,7 @@ exports.getRitualPackages = async (req, res) => {
       status: "true",
       success: true,
       message: FLUTTER_MESSAGES.ritualPackageSuccess,
-      data: {
-        data: formatted,
-      },
+      data: { data: formatted },
     });
   } catch (error) {
     return sendError(res, 500, error.message);
@@ -364,35 +355,15 @@ exports.createRitualOrder = async (req, res) => {
 
     const templeId = getSourceValue(source, "temple_id", "templeId");
     const ritualId = getSourceValue(source, "ritual_id", "ritualId");
-    const ritualPackageId = getSourceValue(
-      source,
-      "ritual_package_id",
-      "ritualPackageId"
-    );
+    const ritualPackageId = getSourceValue(source, "ritual_package_id", "ritualPackageId");
     const date = getSourceValue(source, "date");
-    const whatsAppNumber = getSourceValue(
-      source,
-      "whatsAppNumber",
-      "whatsapp_number"
-    );
-    const devoteeName = getSourceValue(
-      source,
-      "devoteeName",
-      "devotees_name"
-    );
+    const whatsAppNumber = getSourceValue(source, "whatsAppNumber", "whatsapp_number");
+    const devoteeName = getSourceValue(source, "devoteeName", "devotees_name");
     const wish = getSourceValue(source, "wish") || "";
     const offerId = getSourceValue(source, "offerId", "offer_id");
-    const paymentType =
-      toNumberOrNull(getSourceValue(source, "paymentType", "payment_type")) || 2;
+    const paymentType = toNumberOrNull(getSourceValue(source, "paymentType", "payment_type")) || 2;
 
-    if (
-      !templeId ||
-      !ritualId ||
-      !ritualPackageId ||
-      !date ||
-      !whatsAppNumber ||
-      !devoteeName
-    ) {
+    if (!templeId || !ritualId || !ritualPackageId || !date || !whatsAppNumber || !devoteeName) {
       return sendError(res, 400, "Required booking fields are missing");
     }
 
@@ -460,9 +431,7 @@ exports.createRitualOrder = async (req, res) => {
         temple_id: Number(templeDoc.sql_id || 0),
         ritual_id: Number(ritualDoc.sql_id || 0),
         ritual_package_id: Number(packageDoc.sql_id || 0),
-        date: booking.date
-          ? booking.date.toISOString()
-          : new Date().toISOString(),
+        date: booking.date ? booking.date.toISOString() : new Date().toISOString(),
         whatsapp_number: String(booking.whatsapp_number || ""),
         devotees_name: String(booking.devotees_name || ""),
         wish: String(booking.wish || ""),
@@ -490,21 +459,9 @@ exports.verifyRitualBooking = async (req, res) => {
   try {
     const source = { ...req.query, ...req.body };
 
-    const razorpay_order_id = getSourceValue(
-      source,
-      "razorPayOrderId",
-      "razorpay_order_id"
-    );
-    const razorpay_payment_id = getSourceValue(
-      source,
-      "razorPayPaymentId",
-      "razorpay_payment_id"
-    );
-    const razorpay_signature = getSourceValue(
-      source,
-      "razorPaySignature",
-      "razorpay_signature"
-    );
+    const razorpay_order_id = getSourceValue(source, "razorPayOrderId", "razorpay_order_id");
+    const razorpay_payment_id = getSourceValue(source, "razorPayPaymentId", "razorpay_payment_id");
+    const razorpay_signature = getSourceValue(source, "razorPaySignature", "razorpay_signature");
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return sendError(res, 400, "Missing payment verification fields");
@@ -560,9 +517,7 @@ exports.verifyRitualBooking = async (req, res) => {
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID || ""),
           payment_status: Number(booking.payment_status || 2),
           payment_type: Number(booking.payment_type || 2),
-          payment_date: booking.payment_date
-            ? booking.payment_date.toISOString()
-            : null,
+          payment_date: booking.payment_date ? booking.payment_date.toISOString() : null,
         },
       },
     });
@@ -592,8 +547,8 @@ exports.getMyRitualBookings = async (req, res) => {
       const favoriteDocs = await Favorite.find({
         user_id: userSqlId,
         type: 2,
-        reference_id: { $in: ritualIds },
         status: 1,
+        reference_id: { $in: ritualIds },
       }).lean();
 
       favoriteSet = new Set(favoriteDocs.map((f) => Number(f.reference_id)));
@@ -612,9 +567,7 @@ exports.getMyRitualBookings = async (req, res) => {
             description: String(booking.ritual_id.description || ""),
             image: formatImageUrl(booking.ritual_id.image || ""),
             image_thumb: formatImageUrl(booking.ritual_id.image || ""),
-            is_favorite: favoriteSet.has(Number(booking.ritual_id.sql_id))
-              ? 1
-              : 0,
+            is_favorite: favoriteSet.has(Number(booking.ritual_id.sql_id)) ? 1 : 0,
           }
         : null,
     }));
