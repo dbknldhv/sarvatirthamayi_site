@@ -204,7 +204,7 @@ exports.favourite = async (req, res) => {
     const normalizedReferenceId = Number(target.reference_id || reference_id);
 
     const filter = {
-      user_id: userId,
+      user_id: Numer(userId),
       reference_id: normalizedReferenceId,
       type,
     };
