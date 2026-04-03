@@ -63,10 +63,10 @@ router.get("/favorite/index", protect, favouriteController.favouriteGet);
 router.get("/favorite/list", protect, favouriteController.favouriteGet);
 
 // --- Temple Public Routes ---
-router.get("/temple/index", joinNowController.getPublicTemples);
-router.post("/temple/show", joinNowController.getPublicTempleById);
+router.get("/temple/index",protect, joinNowController.getPublicTemples);
+router.post("/temple/show",protect, joinNowController.getPublicTempleById);
 router.get("/temples", joinNowController.getPublicTemples);
-router.get("/temples/:id", joinNowController.getPublicTempleById);
+router.get("/temples/:id", protect, joinNowController.getPublicTempleById);
 router.get("/temple-assistants/:templeId", userController.getAssistantsByTemple);
 
 // --- Donation Routes ---

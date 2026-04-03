@@ -1,7 +1,30 @@
 const Temple = require("../../models/Temple");
 const State = require("../../models/State");
 const Membership = require("../../models/Membership");
+const Favorite = require("../../models/Favorite");
+const User = require("../../models/User");
 const formatImageUrl = require("../../utils/imageUrl");
+
+/**
+ * Resolve logged-in user's numeric sql_id
+ */
+const getAuthUserSqlId = async (req) => {
+  const directSqlId = Number(req.user?.sql_id || req.user?.user_id);
+  if (!Number.isNaN(directSqlId) && directSqlId > 0) {
+    return directSqlId;
+  }
+
+  const mongoUserId = req.user?._id || req.user?.id;
+  if (mongoUserId) {
+    const dbUser = await User.findById(mongoUserId).select("sql_id").lean();
+    const dbSqlId = Number(dbUser?.sql_id);
+    if (!Number.isNaN(dbSqlId) && dbSqlId > 0) {
+      return dbSqlId;
+    }
+  }
+
+  return 0;
+};
 
 /**
  * 1. Get States for Dropdown
@@ -58,11 +81,27 @@ exports.getPublicTemples = async (req, res) => {
       .limit(limit)
       .lean();
 
+    const authUserSqlId = await getAuthUserSqlId(req);
+
+    let favoriteSet = new Set();
+
+    if (authUserSqlId > 0) {
+      const favoriteDocs = await Favorite.find({
+        user_id: authUserSqlId,
+        type: 1,
+        status: 1,
+      }).lean();
+
+      favoriteSet = new Set(
+        favoriteDocs.map((fav) => Number(fav.reference_id))
+      );
+    }
+
     const templeData = temples.map((t) => ({
       id: parseInt(t.sql_id) || 0,
       name: t.name || "",
       sequence: parseInt(t.sequence) || 0,
-      is_favorite: 0,
+      is_favorite: favoriteSet.has(Number(t.sql_id)) ? 1 : 0,
       image: formatImageUrl(t.image),
       image_thumb: formatImageUrl(t.image),
     }));
@@ -120,6 +159,20 @@ exports.getPublicTempleById = async (req, res) => {
       });
     }
 
+    const authUserSqlId = await getAuthUserSqlId(req);
+
+    let isFavorite = 0;
+    if (authUserSqlId > 0) {
+      const favoriteExists = await Favorite.exists({
+        user_id: authUserSqlId,
+        reference_id: parseInt(temple.sql_id, 10),
+        type: 1,
+        status: 1,
+      });
+
+      isFavorite = favoriteExists ? 1 : 0;
+    }
+
     const formattedData = {
       id: parseInt(temple.sql_id) || 0,
       name: temple.name || "",
@@ -129,7 +182,8 @@ exports.getPublicTempleById = async (req, res) => {
       visit_price: String(temple.visit_price || "0"),
       address: {
         full_address:
-          temple.full_address || `${temple.city_name || ""}, ${temple.state_name || ""}`.trim(),
+          temple.full_address ||
+          `${temple.city_name || ""}, ${temple.state_name || ""}`.trim(),
         address_line1: temple.address_line1 || "",
         address_line2: temple.address_line2 || "",
         landmark: temple.landmark || "",
@@ -143,7 +197,7 @@ exports.getPublicTempleById = async (req, res) => {
       },
       open_time: temple.open_time || "06:00 AM",
       close_time: temple.close_time || "09:00 PM",
-      is_favorite: 0,
+      is_favorite: isFavorite,
       devotees_booked_count: temple.devotees_booked_count || 0,
       image: formatImageUrl(temple.image),
       image_thumb: formatImageUrl(temple.image),
