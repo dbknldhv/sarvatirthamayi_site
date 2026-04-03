@@ -52,7 +52,7 @@ favoriteSchema.index(
   { unique: true }
 );
 
-favoriteSchema.pre("save", function (next) {
+favoriteSchema.pre("save", function () {
   this.updated_at = new Date();
   next();
 });
