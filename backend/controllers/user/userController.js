@@ -110,9 +110,20 @@ exports.verifyOtp = async (req, res) => {
         user.is_verified = true;
         user.otp = null; 
         user.otp_expires = null;
+        
+        // Ensure sql_id exists before generating token
+        if (!user.sql_id) {
+            const lastUser = await User.findOne().sort({ sql_id: -1 });
+            user.sql_id = (lastUser?.sql_id || 0) + 1;
+        }
         await user.save();
 
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+        // 🎯 PROD FIX: Added sql_id to JWT payload
+        const token = jwt.sign(
+            { id: user._id, sql_id: user.sql_id }, 
+            process.env.JWT_SECRET, 
+            { expiresIn: "30d" }
+        );
 
         res.status(200).json({ 
             status: "true",
@@ -120,7 +131,8 @@ exports.verifyOtp = async (req, res) => {
             message: "Account verified successfully!",
             token: token,
             data: {
-                userId: user._id.toString(),
+                userId: String(user.sql_id), // Send numeric ID to Flutter
+                mongoId: user._id.toString(),
                 accessToken: token,
                 first_name: user.first_name
             }
@@ -170,7 +182,10 @@ exports.loginUser = async (req, res) => {
         const isMatch = await user.matchPassword(password);
         if (!isMatch) return res.status(401).json({ success: false, message: "Invalid credentials." });
 
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+        const token = jwt.sign(
+            { id: user._id, sql_id: user.sql_id }, 
+            process.env.JWT_SECRET, 
+            { expiresIn: "30d" });
         
         let redirectPath = "/";
         let userTypeInt = 3; // Default for regular users

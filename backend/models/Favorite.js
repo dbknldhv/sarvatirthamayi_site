@@ -54,7 +54,7 @@ favoriteSchema.index(
 
 favoriteSchema.pre("save", function (next) {
   this.updated_at = new Date();
-  //next();
+  next(); // Always call next() in a non-async pre-hook to prevent hanging
 });
 
 module.exports =
