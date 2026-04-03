@@ -9,67 +9,67 @@ const baseUrl = "https://api.sarvatirthamayi.com/";
 const formatImageUrl = (imgPath) => {
   if (!imgPath) return `${baseUrl}uploads/default.png`;
   if (String(imgPath).startsWith("http")) return imgPath;
+
   const cleanPath = String(imgPath).replace(/\\/g, "/");
-  return `${baseUrl}${cleanPath.startsWith("/") ? cleanPath.substring(1) : cleanPath}`;
+  return `${baseUrl}${cleanPath.startsWith("/") ? cleanPath.slice(1) : cleanPath}`;
 };
 
-const getAuthUserObjectId = (req) => {
+const getAuthMongoUserId = (req) => {
   return req.user?._id || req.user?.id || null;
 };
 
-/**
- * Resolve numeric user id for favorites table
- * Priority:
- * 1. req.user.sql_id
- * 2. req.user.user_id if numeric
- * 3. fetch current user from DB and use sql_id
- * 4. fallback: find favorite records by mobile/email mapped user if needed
- */
-const getUserNumericId = async (req) => {
-  try {
+const getNextUserSqlId = async () => {
+  const lastUser = await User.findOne({
+    sql_id: { $ne: null },
+  })
+    .sort({ sql_id: -1 })
+    .select("sql_id")
+    .lean();
 
-    // Case 1: middleware already attached sql_id
-    if (req.user?.sql_id && !isNaN(Number(req.user.sql_id))) {
+  return Number(lastUser?.sql_id || 0) + 1;
+};
+
+const getOrCreateUserSqlId = async (req) => {
+  try {
+    if (req.user?.sql_id != null && !isNaN(Number(req.user.sql_id))) {
       return Number(req.user.sql_id);
     }
 
-    // Case 2: middleware attached numeric user_id
-    if (req.user?.user_id && !isNaN(Number(req.user.user_id))) {
+    if (req.user?.user_id != null && !isNaN(Number(req.user.user_id))) {
       return Number(req.user.user_id);
     }
 
-    // Case 3: token contains Mongo _id
-    const mongoUserId = req.user?._id || req.user?.id;
+    const mongoUserId = getAuthMongoUserId(req);
+    if (!mongoUserId) return 0;
 
-    if (!mongoUserId) {
-      console.log("No Mongo user id in req.user");
-      return 0;
+    let user = await User.findById(mongoUserId).select("_id sql_id").lean();
+    if (!user) return 0;
+
+    if (user.sql_id != null && !isNaN(Number(user.sql_id))) {
+      return Number(user.sql_id);
     }
 
-    const user = await User.findById(mongoUserId)
-      .select("sql_id")
-      .lean();
+    const nextSqlId = await getNextUserSqlId();
 
-    if (!user) {
-      console.log("User not found for id:", mongoUserId);
-      return 0;
-    }
+    await User.updateOne(
+      { _id: mongoUserId, $or: [{ sql_id: null }, { sql_id: { $exists: false } }] },
+      { $set: { sql_id: nextSqlId } }
+    );
 
-    if (!user.sql_id) {
-      console.log("User found but sql_id missing:", user);
-      return 0;
-    }
-
-    return Number(user.sql_id);
-
-  } catch (err) {
-    console.log("getUserNumericId error:", err);
+    user = await User.findById(mongoUserId).select("_id sql_id").lean();
+    return Number(user?.sql_id || 0);
+  } catch (error) {
+    console.error("getOrCreateUserSqlId error:", error);
     return 0;
   }
 };
 
-const getNextSqlId = async () => {
-  const lastDoc = await Favorite.findOne().sort({ sql_id: -1 }).lean();
+const getNextFavoriteSqlId = async () => {
+  const lastDoc = await Favorite.findOne()
+    .sort({ sql_id: -1 })
+    .select("sql_id")
+    .lean();
+
   return Number(lastDoc?.sql_id || 0) + 1;
 };
 
@@ -156,9 +156,10 @@ const resolveFavoriteTarget = async (referenceId, type) => {
   return null;
 };
 
+// POST /api/v1/favourite
 exports.favourite = async (req, res) => {
   try {
-    const userId = await getUserNumericId(req);
+    const userId = await getOrCreateUserSqlId(req);
     const reference_id = Number(req.body.reference_id);
     const type = Number(req.body.type);
     const action = Number(req.body.action);
@@ -200,9 +201,11 @@ exports.favourite = async (req, res) => {
       });
     }
 
+    const normalizedReferenceId = Number(target.reference_id || reference_id);
+
     const filter = {
       user_id: userId,
-      reference_id: Number(target.reference_id || reference_id),
+      reference_id: normalizedReferenceId,
       type,
     };
 
@@ -210,17 +213,19 @@ exports.favourite = async (req, res) => {
       const existing = await Favorite.findOne(filter).lean();
 
       if (!existing) {
-        const sql_id = await getNextSqlId();
+        const sql_id = await getNextFavoriteSqlId();
 
         await Favorite.create({
           sql_id,
           user_id: userId,
-          reference_id: Number(target.reference_id || reference_id),
+          reference_id: normalizedReferenceId,
           temple_id: Number(target.temple_id || 0),
           type,
           status: 1,
+          created_at: new Date(),
+          updated_at: new Date(),
         });
-      } else if (Number(existing.status) !== 1) {
+      } else {
         await Favorite.updateOne(
           { _id: existing._id },
           {
@@ -260,9 +265,10 @@ exports.favourite = async (req, res) => {
   }
 };
 
+// GET /api/v1/favorite/index
 exports.favouriteGet = async (req, res) => {
   try {
-    const userId = await getUserNumericId(req);
+    const userId = await getOrCreateUserSqlId(req);
     const page = Math.max(Number(req.query.page) || 1, 1);
     const perPage = Math.max(Number(req.query.per_page) || 10, 1);
     const skip = (page - 1) * perPage;
