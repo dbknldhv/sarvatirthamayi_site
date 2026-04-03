@@ -101,34 +101,50 @@ exports.getRitualsByTemple = async (req, res) => {
     const source = { ...req.query, ...req.body };
     const templeId = getSourceValue(source, "temple_id", "templeId");
 
-    // 1. 🛡️ Bulletproof Guard: Extract ONLY the number
-    // We ignore req.user.id (string) and ONLY use req.user.sql_id (number)
-    const userId = Number(req.user?.sql_id);
+    /**
+     * 1. 🛡️ THE CRITICAL FIX: Extract sql_id and force to Number.
+     * If the token is old or sql_id is missing, it defaults to 0.
+     * This prevents passing "NaN" or "ObjectId String" to a numeric DB field.
+     */
+    const userId = Number(req.user?.sql_id) || 0;
 
-    if (!templeId) return sendError(res, 400, "temple_id is required");
+    if (!templeId) {
+      return sendError(res, 400, "temple_id is required");
+    }
 
+    // Find the temple using the helper
     const temple = await Temple.findOne(buildTempleLookup(templeId)).lean();
-    if (!temple) return sendError(res, 404, "Temple not found");
+    if (!temple) {
+      return sendError(res, 404, "Temple not found");
+    }
 
-    const rituals = await Ritual.find({ temple_id: temple._id, status: 1 })
+    // Fetch rituals belonging to this temple
+    const rituals = await Ritual.find({
+      temple_id: temple._id,
+      status: 1,
+    })
       .sort({ sequence: 1, created_at: -1 })
       .lean();
 
+    // Map the numeric SQL IDs of the rituals for the favorite check
     const ritualSqlIds = rituals.map((r) => Number(r.sql_id)).filter(Boolean);
 
-    // 2. 🎯 Fix the 500 error here:
-    // Only query favorites if userId is a valid number and NOT NaN
+    /**
+     * 2. 🎯 CRASH PROTECTION: Only query Favorites if userId is valid.
+     * If userId is 0 (old token), we skip this to avoid the 500 error.
+     */
     let favoriteSet = new Set();
-    
-    if (userId && !isNaN(userId)) {
+    if (userId > 0) {
       const favoriteDocs = await Favorite.find({
-        user_id: userId, 
-        type: 2,
+        user_id: userId, // Guaranteed to be a Number (e.g., 131)
+        type: 2,         // Type 2 = Ritual
         reference_id: { $in: ritualSqlIds },
       }).lean();
+
       favoriteSet = new Set(favoriteDocs.map((f) => Number(f.reference_id)));
     }
 
+    // Format data for Flutter/React
     const formatted = rituals.map((ritual) => ({
       id: Number(ritual.sql_id) || 0,
       name: String(ritual.name || ""),
@@ -137,7 +153,7 @@ exports.getRitualsByTemple = async (req, res) => {
       temple_name: String(temple.name || ""),
       image: formatImageUrl(ritual.image),
       image_thumb: formatImageUrl(ritual.image),
-      devotees_booked_count: 0,
+      devotees_booked_count: 0, // Placeholder as per your original logic
       is_favorite: favoriteSet.has(Number(ritual.sql_id)) ? 1 : 0,
       address: buildTempleAddress(temple),
     }));
@@ -153,12 +169,20 @@ exports.getRitualsByTemple = async (req, res) => {
         is_prev: false,
         total_pages: 1,
         current_page: 1,
-        per_page: formatted.length
+        per_page: formatted.length,
+        from: formatted.length ? 1 : 0,
+        to: formatted.length,
+        next_page_url: null,
+        prev_page_url: null,
+        path: req.originalUrl,
+        has_pages: false,
+        links: [],
       },
     });
   } catch (error) {
-    console.error("CRITICAL ERROR IN RITUAL LIST:", error.message);
-    return sendError(res, 500, "Internal Server Error"); // Keep it clean for Flutter
+    console.error("🔥 Ritual List Error:", error.message);
+    // Return a graceful error response instead of crashing the app
+    return sendError(res, 500, "Internal Server Error");
   }
 };
 
