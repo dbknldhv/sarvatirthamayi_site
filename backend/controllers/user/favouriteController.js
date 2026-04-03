@@ -161,9 +161,25 @@ exports.favouriteGet = async (req, res) => {
 
     if (!userId) {
       return res.status(401).json({
-        status: "error",
+        status: "false",
         success: false,
         message: "Unauthorized",
+        data: {
+          data: [],
+          total_count: 0,
+          is_next: false,
+          is_prev: false,
+          total_pages: 0,
+          current_page: 1,
+          per_page: 10,
+          from: 0,
+          to: 0,
+          next_page_url: null,
+          prev_page_url: null,
+          path: `${baseUrl}api/v1/favorite/index`,
+          has_pages: false,
+          links: [],
+        },
       });
     }
 
@@ -174,6 +190,7 @@ exports.favouriteGet = async (req, res) => {
     const query = { user_id: userId, status: 1 };
 
     const totalCount = await Favorite.countDocuments(query);
+
     const favorites = await Favorite.find(query)
       .sort({ created_at: -1 })
       .skip(skip)
@@ -205,7 +222,7 @@ exports.favouriteGet = async (req, res) => {
     const totalPages = Math.max(Math.ceil(totalCount / perPage), 1);
 
     return res.status(200).json({
-      status: "success",
+      status: "true",
       success: true,
       message: "Favourite list fetched successfully",
       data: {
@@ -218,8 +235,14 @@ exports.favouriteGet = async (req, res) => {
         per_page: perPage,
         from: mappedData.length ? skip + 1 : 0,
         to: skip + mappedData.length,
-        next_page_url: page < totalPages ? `${baseUrl}api/v1/favorite/index?page=${page + 1}` : null,
-        prev_page_url: page > 1 ? `${baseUrl}api/v1/favorite/index?page=${page - 1}` : null,
+        next_page_url:
+          page < totalPages
+            ? `${baseUrl}api/v1/favorite/index?page=${page + 1}`
+            : null,
+        prev_page_url:
+          page > 1
+            ? `${baseUrl}api/v1/favorite/index?page=${page - 1}`
+            : null,
         path: `${baseUrl}api/v1/favorite/index`,
         has_pages: totalPages > 1,
         links: [],
@@ -227,10 +250,11 @@ exports.favouriteGet = async (req, res) => {
     });
   } catch (error) {
     console.error("Favourite Get Error:", error);
+
     return res.status(200).json({
-      status: "error",
+      status: "false",
       success: false,
-      message: error.message,
+      message: "Favourite list fetched successfully",
       data: {
         data: [],
         total_count: 0,
