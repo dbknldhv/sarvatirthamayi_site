@@ -101,8 +101,8 @@ exports.getRitualsByTemple = async (req, res) => {
     const source = { ...req.query, ...req.body };
     const templeId = getSourceValue(source, "temple_id", "templeId");
 
-    // 🛡️ PRODUCTION GUARD: Strictly extract sql_id
-    // We only use sql_id because user_id in the Favorite schema is a Number
+    // 1. 🛡️ Bulletproof Guard: Extract ONLY the number
+    // We ignore req.user.id (string) and ONLY use req.user.sql_id (number)
     const userId = Number(req.user?.sql_id);
 
     if (!templeId) return sendError(res, 400, "temple_id is required");
@@ -116,8 +116,10 @@ exports.getRitualsByTemple = async (req, res) => {
 
     const ritualSqlIds = rituals.map((r) => Number(r.sql_id)).filter(Boolean);
 
-    // 🎯 QUERY FAVORITES: Only if we have a valid numeric userId
+    // 2. 🎯 Fix the 500 error here:
+    // Only query favorites if userId is a valid number and NOT NaN
     let favoriteSet = new Set();
+    
     if (userId && !isNaN(userId)) {
       const favoriteDocs = await Favorite.find({
         user_id: userId, 
@@ -135,6 +137,7 @@ exports.getRitualsByTemple = async (req, res) => {
       temple_name: String(temple.name || ""),
       image: formatImageUrl(ritual.image),
       image_thumb: formatImageUrl(ritual.image),
+      devotees_booked_count: 0,
       is_favorite: favoriteSet.has(Number(ritual.sql_id)) ? 1 : 0,
       address: buildTempleAddress(temple),
     }));
@@ -154,8 +157,8 @@ exports.getRitualsByTemple = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("🔥 Ritual List Error:", error.message);
-    return sendError(res, 500, error.message);
+    console.error("CRITICAL ERROR IN RITUAL LIST:", error.message);
+    return sendError(res, 500, "Internal Server Error"); // Keep it clean for Flutter
   }
 };
 
