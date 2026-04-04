@@ -10,11 +10,10 @@ const { generateMembershipCertificate } = require("../../utils/pdfGenerator");
 const mailSender = require("../../utils/mailSender");
 
 /**
- * -----------------------------
- * Helpers
- * -----------------------------
+ * --------------------------------
+ * Common Response Helpers
+ * --------------------------------
  */
-
 const sendError = (res, statusCode, message, extra = {}) => {
   return res.status(statusCode).json({
     status: "false",
@@ -34,16 +33,18 @@ const sendSuccess = (res, message, data = null, extra = {}) => {
   });
 };
 
+/**
+ * --------------------------------
+ * Utility Helpers
+ * --------------------------------
+ */
 const getRazorpayInstance = () => {
   const key_id = process.env.RAZORPAY_KEY_ID;
   const key_secret = process.env.RAZORPAY_KEY_SECRET;
 
   if (!key_id || !key_secret) return null;
 
-  return new Razorpay({
-    key_id,
-    key_secret,
-  });
+  return new Razorpay({ key_id, key_secret });
 };
 
 const toNumberOrNull = (value) => {
@@ -56,6 +57,20 @@ const safeString = (value, fallback = "") => {
   if (value === undefined || value === null) return fallback;
   return String(value);
 };
+
+const normalizePriceString = (value) => {
+  const n = Number(value || 0);
+  if (Number.isNaN(n)) return "0";
+  return String(n);
+};
+
+const normalizeDate = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+};
+
+const isObjectId = (value) => mongoose.isValidObjectId(String(value));
 
 const getSourceValue = (source, ...keys) => {
   for (const key of keys) {
@@ -70,8 +85,14 @@ const getSourceValue = (source, ...keys) => {
   return null;
 };
 
+/**
+ * Always return positive integer.
+ * Prefer sql_id.
+ * Fallback to stable numeric value derived from Mongo _id.
+ * Final fallback avoids ever returning 0.
+ */
 const generateStableNumericId = (doc) => {
-  if (!doc) return 0;
+  if (!doc) return Math.floor(100000 + Math.random() * 900000);
 
   if (doc.sql_id !== undefined && doc.sql_id !== null && doc.sql_id !== "") {
     const n = Number(doc.sql_id);
@@ -80,27 +101,14 @@ const generateStableNumericId = (doc) => {
 
   if (doc._id) {
     try {
-      return parseInt(String(doc._id).slice(-6), 16);
+      const parsed = Math.abs(parseInt(String(doc._id).slice(-6), 16));
+      if (!Number.isNaN(parsed) && parsed > 0) return parsed;
     } catch (error) {
-      return 0;
+      // ignore and fallback below
     }
   }
 
-  return 0;
-};
-
-const isObjectId = (value) => mongoose.isValidObjectId(String(value));
-
-const normalizeDate = (value) => {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-};
-
-const normalizePriceString = (value) => {
-  const n = Number(value || 0);
-  if (Number.isNaN(n)) return "0";
-  return String(n);
+  return Math.floor(100000 + Math.random() * 900000);
 };
 
 const buildMembershipLookup = (planId) => {
@@ -147,10 +155,8 @@ const calculateEndDate = (startDate, duration, durationType) => {
 };
 
 const normalizeMembershipPlanForFlutter = (plan) => {
-  const id = generateStableNumericId(plan);
-
   return {
-    id,
+    id: generateStableNumericId(plan),
     name: safeString(plan?.name),
     description: safeString(plan?.description),
     visits: Number(plan?.visits || 0),
@@ -158,14 +164,9 @@ const normalizeMembershipPlanForFlutter = (plan) => {
     duration: Number(plan?.duration || 1),
     duration_type: Number(plan?.duration_type || 1),
     status: Number(plan?.status || 1),
-
-    // Optional extra info for future use.
-    // Flutter can ignore unknown keys safely.
     temples: Array.isArray(plan?.temples)
       ? plan.temples.map((item) => ({
-          temple_id: item?.templeId
-            ? safeString(item.templeId)
-            : safeString(item?.temple_id),
+          temple_id: safeString(item?.templeId || item?.temple_id),
           name: safeString(item?.name),
           max_visits: Number(item?.maxVisits || item?.max_visits || 0),
         }))
@@ -199,18 +200,16 @@ const findActivePurchasedMembership = async (userId) => {
     card_status: 1,
     end_date: { $gte: now },
   })
-    .sort({ created_at: -1, _id: -1 })
+    .sort({ createdAt: -1, created_at: -1, _id: -1 })
     .populate("membership_card_id")
     .lean();
 };
 
 /**
- * -----------------------------
- * 1. Get active membership plans
+ * --------------------------------
+ * 1. Get Active Membership Plans
  * GET /membership-card/index
- * -----------------------------
- *
- * Flutter expects a paginated-like object inside data.
+ * --------------------------------
  */
 exports.getActiveMemberships = async (req, res) => {
   try {
@@ -243,20 +242,17 @@ exports.getActiveMemberships = async (req, res) => {
     });
   } catch (error) {
     console.error("getActiveMemberships error:", error);
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: "Failed to fetch membership plans",
+    return sendError(res, 500, "Failed to fetch membership plans", {
       error: error.message,
     });
   }
 };
 
 /**
- * -----------------------------
- * 2. Create Razorpay order
+ * --------------------------------
+ * 2. Create Razorpay Order
  * POST /membership-card/purchase
- * -----------------------------
+ * --------------------------------
  */
 exports.createMembershipOrder = async (req, res) => {
   try {
@@ -277,6 +273,10 @@ exports.createMembershipOrder = async (req, res) => {
       return sendError(res, 400, "Membership plan ID is required");
     }
 
+    if (!req.user || !req.user.id) {
+      return sendError(res, 401, "User not authorized");
+    }
+
     const razorpay = getRazorpayInstance();
     if (!razorpay) {
       return sendError(res, 500, "Payment Gateway Config Missing");
@@ -290,14 +290,12 @@ exports.createMembershipOrder = async (req, res) => {
     const planNumericId = generateStableNumericId(plan);
     const planPrice = Number(plan.price || 0);
 
-    if (planPrice <= 0) {
+    if (Number.isNaN(planPrice) || planPrice <= 0) {
       return sendError(res, 400, "Invalid membership plan amount");
     }
 
-    // Optional production protection:
-    // Prevent duplicate active plan purchase
+    // Prevent duplicate active same-plan purchase
     const existingActive = await findActivePurchasedMembership(req.user.id);
-
     if (
       existingActive &&
       existingActive.membership_card_id &&
@@ -345,15 +343,17 @@ exports.createMembershipOrder = async (req, res) => {
     );
   } catch (error) {
     console.error("createMembershipOrder error:", error);
-    return sendError(res, 500, "Failed to create membership order");
+    return sendError(res, 500, "Failed to create membership order", {
+      error: error.message,
+    });
   }
 };
 
 /**
- * -----------------------------
- * 3. Verify payment and activate membership
+ * --------------------------------
+ * 3. Verify Payment & Activate Membership
  * POST /membership-card/verify-payment
- * -----------------------------
+ * --------------------------------
  */
 exports.verifyAndActivateMembership = async (req, res) => {
   try {
@@ -386,6 +386,10 @@ exports.verifyAndActivateMembership = async (req, res) => {
       "id"
     );
 
+    if (!req.user || !req.user.id) {
+      return sendError(res, 401, "User not authorized");
+    }
+
     if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
       return sendError(res, 400, "Missing payment verification details");
     }
@@ -403,7 +407,7 @@ exports.verifyAndActivateMembership = async (req, res) => {
       return sendError(res, 400, "Invalid Signature");
     }
 
-    // Prevent duplicate activation on same payment id
+    // If payment already verified earlier, return same success response
     const existingPayment = await PurchasedMemberCard.findOne({
       razorpay_payment_id,
       payment_status: 2,
@@ -427,10 +431,12 @@ exports.verifyAndActivateMembership = async (req, res) => {
 
     let plan = null;
 
+    // Prefer explicit plan_id from Flutter
     if (planId) {
       plan = await findMembershipPlan(planId);
     }
 
+    // Fallback: derive membership from Razorpay receipt
     if (!plan) {
       const razorpay = getRazorpayInstance();
       if (!razorpay) {
@@ -455,8 +461,7 @@ exports.verifyAndActivateMembership = async (req, res) => {
 
     const planNumericId = generateStableNumericId(plan);
 
-    // Optional production protection:
-    // prevent buying same active plan twice
+    // Prevent duplicate active same-plan purchase
     const existingActive = await findActivePurchasedMembership(req.user.id);
     if (
       existingActive &&
@@ -495,7 +500,9 @@ exports.verifyAndActivateMembership = async (req, res) => {
       paid_amount: Number(plan.price || 0),
       sql_id: Math.floor(100000 + Math.random() * 900000),
       favorite_temples: Array.isArray(plan.temples)
-        ? plan.temples.map((item) => item?.templeId).filter(Boolean)
+        ? plan.temples
+            .map((item) => item?.templeId || item?.temple_id)
+            .filter(Boolean)
         : [],
     });
 
@@ -508,20 +515,28 @@ exports.verifyAndActivateMembership = async (req, res) => {
       { new: true }
     ).lean();
 
-    // Background PDF + email
+    // Background PDF/email, do not fail main API if this fails
     Promise.resolve()
       .then(async () => {
         if (!updatedUser?.email) return;
 
-        const { filePath } = await generateMembershipCertificate(newCard, updatedUser);
-        const membershipId = `STM-${String(newCard._id).slice(-6).toUpperCase()}`;
+        const { filePath } = await generateMembershipCertificate(
+          newCard,
+          updatedUser
+        );
+
+        const membershipId = `STM-${String(newCard._id)
+          .slice(-6)
+          .toUpperCase()}`;
 
         await mailSender(
           updatedUser.email,
           "Sovereign Membership Activated",
           `Namaste ${
             updatedUser.name || updatedUser.first_name || "User"
-          }, your membership is active until ${new Date(endDate).toDateString()}.`,
+          }, your membership is active until ${new Date(
+            endDate
+          ).toDateString()}.`,
           [
             {
               filename: `Certificate_${membershipId}.pdf`,
@@ -557,25 +572,31 @@ exports.verifyAndActivateMembership = async (req, res) => {
     );
   } catch (error) {
     console.error("verifyAndActivateMembership error:", error);
-    return sendError(res, 500, "Failed to verify membership payment");
+    return sendError(res, 500, "Failed to verify membership payment", {
+      error: error.message,
+    });
   }
 };
 
 /**
- * -----------------------------
- * 4. Get my purchased membership card
+ * --------------------------------
+ * 4. Get My Purchased Membership
  * GET /membership-card/my-card
- * -----------------------------
+ * --------------------------------
  */
 exports.getMyMembershipCard = async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return sendError(res, 401, "User not authorized");
+    }
+
     const myCard = await PurchasedMemberCard.findOne({
       user_id: req.user.id,
       payment_status: 2,
       card_status: 1,
     })
       .populate("membership_card_id")
-      .sort({ created_at: -1, _id: -1 })
+      .sort({ createdAt: -1, created_at: -1, _id: -1 })
       .lean();
 
     if (!myCard) {
@@ -595,6 +616,8 @@ exports.getMyMembershipCard = async (req, res) => {
     );
   } catch (error) {
     console.error("getMyMembershipCard error:", error);
-    return sendError(res, 500, "Failed to fetch membership details");
+    return sendError(res, 500, "Failed to fetch membership details", {
+      error: error.message,
+    });
   }
 };
