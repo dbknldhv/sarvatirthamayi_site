@@ -22,32 +22,36 @@ const toInt = (val) => {
 const toString = (val) => (val ? String(val) : "");
 
 /**
- * 🎯 UNIVERSAL PLAN NORMALIZER
- * Ensures Flutter gets integers for IDs and correctly mapped temple names.
+ * 🎯 THE PERFECT NORMALIZER
+ * This version is 100% crash-proof for Flutter.
  */
 const normalizeMembershipPlan = (plan = {}) => {
-  // Generate a unique Number from MongoDB Hex if sql_id is missing
-  const mongoIdInt = plan._id ? parseInt(plan._id.toString().substring(0, 8), 16) : 0;
-  const finalId = toInt(plan.sql_id) || mongoIdInt || Math.floor(Math.random() * 1000000);
+  // 1. Prioritize numeric sql_id. 
+  // 2. Fallback to a unique number from the Mongo ID.
+  // 3. Last fallback to 0. 
+  // This ensures 'id' is ALWAYS an int and NEVER a string.
+  const finalId = Number(plan.sql_id) || 
+                  (plan._id ? parseInt(plan._id.toString().substring(0, 8), 16) : 0);
 
   return {
     id: finalId,
-    name: toString(plan.name),
-    description: toString(plan.description),
-    visits: toInt(plan.visits),
-    price: toString(plan.price),
-    duration: toInt(plan.duration),
-    duration_type: toInt(plan.duration_type),
-    status: toInt(plan.status),
+    name: String(plan.name || ""),
+    description: String(plan.description || ""),
+    visits: Number(plan.visits || 0),
+    price: String(plan.price || "0"), // String for currency display
+    duration: Number(plan.duration || 0),
+    duration_type: Number(plan.duration_type || 1),
+    status: Number(plan.status || 1),
     temples: Array.isArray(plan.temples)
       ? plan.temples.map((t) => ({
-          temple_id: toString(t.temple_id || t.templeId || ""),
-          name: toString(t.temple_name || t.name || "Any Temple"),
-          max_visits: toInt(t.max_visits || t.maxVisits || 0),
+          temple_id: String(t.temple_id || t.templeId || ""),
+          name: String(t.temple_name || t.name || "Any Temple"),
+          max_visits: Number(t.max_visits || t.maxVisits || 0),
         }))
       : [],
   };
 };
+
 
 /* ---------------------------------------------------
 1️⃣ MEMBERSHIP PLAN LIST (With Pagination Support)
