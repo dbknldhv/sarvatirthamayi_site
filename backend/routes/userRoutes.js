@@ -16,11 +16,7 @@ const privacyController = require("../controllers/user/privacyController");
 const favouriteController = require("../controllers/user/favouriteController");
 const offerController = require("../controllers/user/offerController");
 
-/**
- * 🎯 FIXED: Membership Controller Import
- * Using destructuring ensures the router receives the actual functions, 
- * resolving the 'Route.get() requires a callback but got Undefined' error.
- */
+// Destructured Membership Controller (Ensures no 'undefined' callbacks)
 const { 
   getActiveMemberships, 
   purchaseMembershipCard, 
@@ -37,10 +33,8 @@ router.get("/test-route", (req, res) => {
   res.json({ message: "User router is working!" });
 });
 
-// --- Contact ---
-router.post("/contact-us", contactController.contactUs);
-
 // --- Public / Basic Data ---
+router.post("/contact-us", contactController.contactUs);
 router.get("/about-data", aboutController.getAboutPageData);
 router.get("/about-us", aboutController.getAboutUs);
 router.get("/privacy-policy", privacyController.getPrivacyPolicy);
@@ -56,7 +50,7 @@ router.get("/offer/index", protect, offerController.getOffers);
 router.post("/offer/show", protect, offerController.getOfferById);
 router.get("/offers/:id", protect, offerController.getOfferById);
 
-// --- Favourite / Favorite Compatibility ---
+// --- Favourite / Favorite Compatibility (Cleaned Duplicates) ---
 router.post("/favourite", protect, favouriteController.favourite);
 router.post("/favorite", protect, favouriteController.favourite);
 router.get("/favourite/index", protect, favouriteController.favouriteGet);
@@ -93,46 +87,33 @@ router.post("/logout", protect, userController.logoutUser);
 router.post("/forgot-password", userController.forgotPassword);
 router.post("/reset-password", userController.resetPassword);
 
-// --- Protected User Routes ---
+// --- Protected User Profile ---
 router.get("/auth/check-auth", protect, (req, res) => {
   res.status(200).json({ success: true, user: req.user });
 });
 router.get("/profile", protect, userController.getProfile);
 router.post("/profile", protect, upload.fields([{ name: "profile_picture", maxCount: 1 }]), userController.updateProfile);
+router.put("/update-profile", protect, upload.fields([
+    { name: "profile_picture", maxCount: 1 },
+    { name: "bannerImage", maxCount: 1 },
+  ]), userController.updateProfile);
 
 // --- Temple Booking Flow ---
 router.post("/temple/booking", protect, templeBookingController.createTempleBookingOrder);
 router.post("/temple/verify-payment", protect, templeBookingController.verifyAndConfirmBooking);
 router.get("/temple/booking-details", protect, templeBookingController.getMyBookings);
 
-// --- Membership & Cards (FIXED SECTION) ---
+// --- Membership & Cards ---
+router.get("/membership-card/index", protect, getActiveMemberships);
+router.post("/membership-card/purchase", protect, purchaseMembershipCard);
+router.post("/membership-card/verify-payment", protect, verifyMembershipPayment);
+router.get("/membership-card/my-card", protect, getMyMembershipCard);
 
-// 1. Membership Plans List
-router.get(
-  "/membership-card/index",
-  protect,
-  getActiveMemberships // Directly passed function
-);
-
-// 2. Purchase Membership (Create Razorpay Order)
-router.post(
-  "/membership-card/purchase",
-  protect,
-  purchaseMembershipCard // Directly passed function
-);
-
-// 3. Verify Razorpay Payment
-router.post(
-  "/membership-card/verify-payment",
-  protect,
-  verifyMembershipPayment // Directly passed function
-);
-
-// 4. Get User Membership (Profile Display)
-router.get(
-  "/membership-card/my-card",
-  protect,
-  getMyMembershipCard // Directly passed function
-);
+// --- Legacy Compatibility ---
+router.post("/book-temple/create-order", protect, templeBookingController.createTempleBookingOrder);
+router.post("/book-temple/verify", protect, templeBookingController.verifyAndConfirmBooking);
+router.get("/my-temple-bookings", protect, templeBookingController.getMyBookings);
+router.post("/rituals/create-order", protect, ritualController.createRitualOrder);
+router.post("/rituals/verify-booking", protect, ritualController.verifyRitualBooking);
 
 module.exports = router;
