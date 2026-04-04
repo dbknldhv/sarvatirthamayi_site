@@ -32,7 +32,7 @@ const normalizeTempleItem = (item = {}) => ({
 });
 
 const normalizeMembershipPlanForFlutter = (plan = {}) => ({
-  id: plan.sql_id || String(plan._id),
+  id: Number(plan.sql_id) || 0,
   name: plan.name || "",
   description: plan.description || "",
   visits: toNumber(plan.visits),
