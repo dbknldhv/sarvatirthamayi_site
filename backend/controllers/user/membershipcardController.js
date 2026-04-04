@@ -66,33 +66,49 @@ exports.getActiveMemberships = async (req, res) => {
   }
 };
 
-/* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Fixing the "No Response" Issue)
---------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    const planId = req.body.membership_card_id || req.body.memberShipId;
-    const userId = req.user._id;
+    // 🎯 FIX 1: Support both naming conventions from the app
+    const rawId = req.body.membership_card_id || req.body.memberShipId;
+    const userId = req.user._id || req.user.id;
 
-    const membership = await Membership.findOne({
-      $or: [{ sql_id: toInt(planId) }, { _id: mongoose.Types.ObjectId.isValid(planId) ? planId : null }]
-    });
+    if (!rawId) {
+      return res.status(400).json({ status: "false", message: "Membership ID is required" });
+    }
 
-    if (!membership) return res.status(404).json({ status: "false", message: "Plan not found" });
+    /**
+     * 🎯 FIX 2: Polymorphic Lookup
+     * If rawId is a valid Mongo Hex string, search by _id.
+     * If rawId is an integer (like 1), search by sql_id.
+     */
+    let query = { status: 1 };
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      query._id = rawId;
+    } else {
+      query.sql_id = parseInt(rawId);
+    }
 
-    // Calculate actual amount in Paise for Razorpay
+    const membership = await Membership.findOne(query);
+
+    if (!membership) {
+      return res.status(404).json({ status: "false", message: "Plan not found in database" });
+    }
+
+    // Razorpay Integration
     const amountInPaise = Math.round(Number(membership.price) * 100);
-
+    
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    await PurchasedMemberCard.create({
+    const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
+      card_status: 0,
       payment_status: 1,
+      max_visits: membership.visits,
       razorpay_order_id: razorpayOrder.id,
       paid_amount: membership.price
     });
@@ -100,25 +116,28 @@ exports.purchaseMembershipCard = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      /**
-       * 🎯 CRITICAL FIX: Your Flutter listener checks for:
-       * Constants.memberShipVerifyPaymentSuccessMsg
-       * In your strings.dart, that value is: "Membership card purchased successfully"
-       */
+      // 🎯 FIX 3: This message triggers the Flutter Bloc Listener to open Razorpay
       message: "Membership card purchased successfully", 
       data: {
         payment: {
           razorpayOrderId: razorpayOrder.id,
           razorpayPublicKey: process.env.RAZORPAY_KEY_ID,
           amount: amountInPaise,
-        }
+        },
+        purchased_member_card_id: purchased._id
       }
     });
+
   } catch (error) {
-    console.error("🔥 Purchase Error:", error.message);
-    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
+    console.error("🔥 Deep Track Crash:", error.message);
+    return res.status(500).json({ 
+      status: "false", 
+      message: "Purchase initialization failed",
+      error: error.message 
+    });
   }
 };
+
 
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Production Ready & Sync with Flutter)
