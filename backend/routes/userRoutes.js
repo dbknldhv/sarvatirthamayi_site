@@ -131,10 +131,10 @@ router.post("/temple/verify-payment", protect, templeBookingController.verifyAnd
 router.get("/temple/booking-details", protect, templeBookingController.getMyBookings);
 
 // --- Membership & Cards ---
-router.get("/membership-card/index", protect, cardController.getMyMembershipCard);
+router.get("/membership-card/index", protect, cardController.getActiveMemberships);
 router.post("/membership-card/purchase", protect, cardController.createMembershipOrder);
 router.post("/membership-card/verify-payment", protect, cardController.verifyAndActivateMembership);
-
+router.get("/membership-card/my-card", protect, cardController.getMyMembershipCard);
 // --- Legacy Routes ---
 router.post("/book-temple/create-order", protect, templeBookingController.createTempleBookingOrder);
 router.post("/book-temple/verify", protect, templeBookingController.verifyAndConfirmBooking);
