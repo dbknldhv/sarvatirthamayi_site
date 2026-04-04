@@ -10,76 +10,82 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET || "",
 });
 
-
 /* ---------------------------------------------------
-   HELPERS - SMART CASTING & FALLBACKS
+   HELPERS - STRICT TYPE CASTING & FALLBACKS
    --------------------------------------------------- */
 
 const toInt = (val) => {
-    const n = parseInt(val);
-    return isNaN(n) ? 0 : n;
+  const n = parseInt(val);
+  return isNaN(n) ? 0 : n;
 };
 
 const toString = (val) => (val ? String(val) : "");
 
 /**
  * 🎯 UNIVERSAL PLAN NORMALIZER
- * Handles missing sql_ids and varying temple field names
+ * Ensures Flutter gets integers for IDs and correctly mapped temple names.
  */
 const normalizeMembershipPlan = (plan = {}) => {
-    // 1. Generate a unique Number if sql_id is missing to prevent 'id: 0'
-    // We use the timestamp part of the MongoDB _id to make a unique integer
-    const mongoIdInt = plan._id ? parseInt(plan._id.toString().substring(0, 8), 16) : 0;
-    const finalId = toInt(plan.sql_id) || mongoIdInt || Math.floor(Math.random() * 1000);
+  // Generate a unique Number from MongoDB Hex if sql_id is missing
+  const mongoIdInt = plan._id ? parseInt(plan._id.toString().substring(0, 8), 16) : 0;
+  const finalId = toInt(plan.sql_id) || mongoIdInt || Math.floor(Math.random() * 1000000);
 
-    return {
-        id: finalId, 
-        name: toString(plan.name),
-        description: toString(plan.description),
-        visits: toInt(plan.visits),
-        price: toString(plan.price),
-        duration: toInt(plan.duration),
-        duration_type: toInt(plan.duration_type),
-        status: toInt(plan.status),
-        // 2. Flexible Temple Mapping
-        temples: Array.isArray(plan.temples)
-            ? plan.temples.map((t) => ({
-                // Checks for both temple_id and templeId
-                temple_id: toString(t.temple_id || t.templeId || ""),
-                // Checks for both temple_name and name
-                name: toString(t.temple_name || t.name || "Any Temple"), 
-                max_visits: toInt(t.max_visits || t.maxVisits || 0)
-            }))
-            : [],
-    };
+  return {
+    id: finalId,
+    name: toString(plan.name),
+    description: toString(plan.description),
+    visits: toInt(plan.visits),
+    price: toString(plan.price),
+    duration: toInt(plan.duration),
+    duration_type: toInt(plan.duration_type),
+    status: toInt(plan.status),
+    temples: Array.isArray(plan.temples)
+      ? plan.temples.map((t) => ({
+          temple_id: toString(t.temple_id || t.templeId || ""),
+          name: toString(t.temple_name || t.name || "Any Temple"),
+          max_visits: toInt(t.max_visits || t.maxVisits || 0),
+        }))
+      : [],
+  };
 };
 
-
 /* ---------------------------------------------------
-1️⃣ MEMBERSHIP PLAN LIST
+1️⃣ MEMBERSHIP PLAN LIST (With Pagination Support)
 GET /api/v1/membership-card/index
 --------------------------------------------------- */
 exports.getActiveMemberships = async (req, res) => {
   try {
-    const plans = await Membership.find({ status: 1 }).sort({ price: 1 }).lean();
+    // Adding basic pagination support for the Bloc's "LoadMore" event
+    const page = toInt(req.query.page) || 1;
+    const limit = toInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const [plans, totalCount] = await Promise.all([
+      Membership.find({ status: 1 }).sort({ price: 1 }).skip(skip).limit(limit).lean(),
+      Membership.countDocuments({ status: 1 }),
+    ]);
 
     const mapped = plans.map(normalizeMembershipPlan);
 
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "api.member_ship_card_success",
+      message: "api.member_ship_card_success", // Matches Flutter Constants
       data: {
         data: mapped,
+        total_count: totalCount,
+        current_page: page,
+        per_page: limit,
+        next_page_url: totalCount > page * limit ? `${req.baseUrl}${req.path}?page=${page + 1}` : null,
       },
     });
   } catch (error) {
-    console.error("🔥 Membership List Error:", error);
+    console.error("🔥 Membership List Error:", error.message);
     return res.status(500).json({
       status: "false",
       success: false,
-      message: "Failed to load plans",
-      data: { data: [] },
+      message: "Failed to load membership plans",
+      data: { data: [], total_count: 0 },
     });
   }
 };
@@ -90,21 +96,21 @@ POST /api/v1/membership-card/purchase
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    const userId = req.user.id; // From Protect Middleware (String)
+    const userId = req.user._id || req.user.id;
     const { membership_card_id } = req.body;
 
-    // Support lookup by MongoDB _id OR sql_id
+    if (!membership_card_id) return res.status(400).json({ status: "false", message: "membership_card_id is required" });
+
+    // Lookup by Mongo ID or Numeric ID
     const membership = await Membership.findOne({
       $or: [
         { _id: mongoose.Types.ObjectId.isValid(membership_card_id) ? membership_card_id : new mongoose.Types.ObjectId() },
-        { sql_id: toInt(membership_card_id) }
+        { sql_id: toInt(membership_card_id) },
       ],
-      status: 1
+      status: 1,
     });
 
-    if (!membership) {
-      return res.status(404).json({ status: "false", message: "Plan not found" });
-    }
+    if (!membership) return res.status(404).json({ status: "false", message: "Membership plan not found" });
 
     const amount = Math.round(Number(membership.price) * 100);
     const razorpayOrder = await razorpay.orders.create({
@@ -116,30 +122,30 @@ exports.purchaseMembershipCard = async (req, res) => {
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
-      card_status: 0, 
-      payment_status: 1, 
+      card_status: 0, // Inactive
+      payment_status: 1, // Pending
       max_visits: membership.visits,
       used_visits: 0,
       razorpay_order_id: razorpayOrder.id,
       membership_card_amount: membership.price,
-      paid_amount: membership.price
+      paid_amount: membership.price,
     });
 
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "Order created",
+      message: "Membership purchase order created successfully", // Matches Flutter Constants
       data: {
         purchased_member_card_id: purchased._id,
         razorpay_order_id: razorpayOrder.id,
         amount,
         currency: "INR",
-        key: process.env.RAZORPAY_KEY_ID
-      }
+        key: process.env.RAZORPAY_KEY_ID,
+      },
     });
   } catch (error) {
-    console.error("🔥 Purchase Error:", error);
-    return res.status(500).json({ status: "false", message: "Purchase failed" });
+    console.error("🔥 Purchase Error:", error.message);
+    return res.status(500).json({ status: "false", message: "Failed to create purchase order" });
   }
 };
 
@@ -157,36 +163,45 @@ exports.verifyMembershipPayment = async (req, res) => {
       .digest("hex");
 
     if (expected !== razorpay_signature) {
-      return res.status(400).json({ status: "false", message: "Invalid signature" });
+      return res.status(400).json({ status: "false", message: "Invalid payment signature" });
     }
 
     const purchased = await PurchasedMemberCard.findOne({ razorpay_order_id });
-    if (!purchased) return res.status(404).json({ status: "false", message: "Record not found" });
+    if (!purchased) return res.status(404).json({ status: "false", message: "Purchase record not found" });
 
     const membership = await Membership.findById(purchased.membership_card_id);
+    if (!membership) return res.status(404).json({ status: "false", message: "Plan details not found" });
 
     const now = new Date();
-    purchased.payment_status = 2; // Paid
-    purchased.card_status = 1;    // Active
-    purchased.start_date = now;
-    
-    // Calculate end date based on duration type (Assume months if type 1)
     const end = new Date(now);
+
+    // Calculate expiry based on duration type
     if (membership.duration_type === 2) {
-        end.setFullYear(end.getFullYear() + (membership.duration || 1));
+      end.setFullYear(end.getFullYear() + (membership.duration || 1));
     } else {
-        end.setMonth(end.getMonth() + (membership.duration || 1));
+      end.setMonth(end.getMonth() + (membership.duration || 1));
     }
-    purchased.end_date = end;
-    purchased.razorpay_payment_id = razorpay_payment_id;
-    purchased.payment_date = new Date();
+
+    Object.assign(purchased, {
+      payment_status: 2, // Paid
+      card_status: 1, // Active
+      start_date: now,
+      end_date: end,
+      razorpay_payment_id,
+      razorpay_signature,
+      payment_date: new Date(),
+    });
 
     await purchased.save();
 
-    return res.status(200).json({ status: "true", success: true, message: "Payment verified" });
+    return res.status(200).json({
+      status: "true",
+      success: true,
+      message: "Membership payment verified successfully", // Matches Flutter Constants
+    });
   } catch (error) {
-    console.error("🔥 Verification Error:", error);
-    return res.status(500).json({ status: "false", message: "Verification failed" });
+    console.error("🔥 Verification Error:", error.message);
+    return res.status(500).json({ status: "false", message: "Payment verification failed" });
   }
 };
 
@@ -196,28 +211,32 @@ GET /api/v1/membership-card/my-card
 --------------------------------------------------- */
 exports.getMyMembershipCard = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user._id || req.user.id;
 
-    const card = await PurchasedMemberCard
-      .findOne({
-        user_id: userId,
-        payment_status: 2,
-        card_status: 1
-      })
+    const card = await PurchasedMemberCard.findOne({
+      user_id: userId,
+      payment_status: 2,
+      card_status: 1,
+    })
       .sort({ created_at: -1 })
-      .populate("membership_card_id");
+      .populate("membership_card_id")
+      .lean();
 
-    // Default Guest Fallback
+    // Default Guest Fallback if no active card is found
     if (!card || !card.membership_card_id) {
       return res.status(200).json({
         status: "true",
         success: true,
+        message: "Membership card fetched successfully",
         data: {
           id: 1,
           membership_card_name: "Guest",
           membership_card_id: 1,
-          membership_card_price: "0"
-        }
+          membership_card_price: "0",
+          membership_card_description: "Guest Plan",
+          membership_card_duration: 0,
+          membership_card_duration_type: 1,
+        },
       });
     }
 
@@ -226,16 +245,19 @@ exports.getMyMembershipCard = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
+      message: "Membership card fetched successfully",
       data: {
-        // Ensure strictly Numeric IDs for Flutter's "int" fields
-        id: toInt(plan.sql_id) || 1,
+        id: toInt(plan.sql_id) || toInt(card.sql_id) || 1,
         membership_card_name: toString(plan.name),
         membership_card_id: toInt(plan.sql_id) || 1,
-        membership_card_price: toString(plan.price)
-      }
+        membership_card_price: toString(plan.price),
+        membership_card_description: toString(plan.description),
+        membership_card_duration: toInt(plan.duration),
+        membership_card_duration_type: toInt(plan.duration_type),
+      },
     });
   } catch (error) {
-    console.error("🔥 My Card Error:", error);
-    return res.status(500).json({ status: "false", message: "Failed to fetch card" });
+    console.error("🔥 My Card Error:", error.message);
+    return res.status(500).json({ status: "false", success: false, message: "Failed to fetch membership card" });
   }
 };
