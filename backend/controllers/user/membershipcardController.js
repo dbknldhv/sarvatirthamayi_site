@@ -10,10 +10,7 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET || "",
 });
 
-/* ---------------------------------------------------
-   HELPERS - THE TYPE-SAFETY SHIELD
-   --------------------------------------------------- */
-
+/* --- HELPERS --- */
 const toInt = (val) => {
   const n = parseInt(val);
   return isNaN(n) ? 0 : n;
@@ -21,18 +18,10 @@ const toInt = (val) => {
 
 const toString = (val) => (val ? String(val) : "");
 
-/**
- * 🎯 UNIVERSAL PLAN NORMALIZER
- * Ensures IDs are unique integers (even if sql_id is missing or duplicated)
- * and maps all fields strictly to Flutter Model expectations.
- */
 const normalizeMembershipPlan = (plan = {}) => {
-  // Generate a unique integer from MongoDB Hex ID to prevent selection conflicts in Flutter
+  // Use sql_id if available, otherwise generate a unique int from Mongo ID
   const mongoIdInt = plan._id ? parseInt(plan._id.toString().substring(0, 8), 16) : 0;
-  
-  // Logic: Use sql_id if it's unique, otherwise fallback to generated ID
-  // This ensures 'id' is always an 'int' and never a 'string'
-  const finalId = toInt(plan.sql_id) || mongoIdInt || Math.floor(Math.random() * 1000000);
+  const finalId = toInt(plan.sql_id) || mongoIdInt;
 
   return {
     id: finalId,
@@ -46,6 +35,9 @@ const normalizeMembershipPlan = (plan = {}) => {
   };
 };
 
+/* ---------------------------------------------------
+1️⃣ GET ALL MEMBERSHIPS (Sync with Flutter Strings)
+--------------------------------------------------- */
 exports.getActiveMemberships = async (req, res) => {
   try {
     const page = toInt(req.query.page) || 1;
@@ -59,14 +51,14 @@ exports.getActiveMemberships = async (req, res) => {
 
     const mapped = plans.map(normalizeMembershipPlan);
 
-    // 🎯 We must provide the FULL structure defined in your member_ship_card.dart
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "api.member_ship_card_success",
+      // 🎯 CRITICAL: Matches Constants.memberShipCardSuccessMsg in your strings.dart
+      message: "Membership card list fetched successfully", 
       data: {
-        data: mapped, // List of plans
-        total_count: totalCount, // REQUIRED for Flutter Data.fromJson
+        data: mapped,
+        total_count: totalCount,
         is_next: totalCount > page * limit,
         is_prev: page > 1,
         total_pages: Math.ceil(totalCount / limit),
@@ -74,38 +66,31 @@ exports.getActiveMemberships = async (req, res) => {
         per_page: limit,
         from: skip + 1,
         to: skip + mapped.length,
-        // Bloc uses this to check if there is more to load
+        // Bloc uses this to set _hasMore logic
         next_page_url: totalCount > page * limit ? `https://api.sarvatirthamayi.com/api/v1/membership-card/index?page=${page + 1}` : null,
         prev_page_url: page > 1 ? `https://api.sarvatirthamayi.com/api/v1/membership-card/index?page=${page - 1}` : null,
         path: "https://api.sarvatirthamayi.com/api/v1/membership-card/index",
         has_pages: totalCount > limit,
-        links: [] // Placeholder for your Link class
+        links: []
       },
     });
   } catch (error) {
-    console.error("🔥 Index Load Error:", error);
     return res.status(500).json({ status: "false", message: "Internal Server Error" });
   }
 };
 
-
-
 /* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Initialization)
-POST /api/v1/membership-card/purchase
+2️⃣ PURCHASE MEMBERSHIP (Sync with Razorpay UI Logic)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    const { memberShipId } = req.body; // 🎯 Matches Bloc Event
+    const { membership_card_id } = req.body; 
     const userId = req.user._id || req.user.id;
 
-    if (!memberShipId) return res.status(400).json({ status: "false", message: "memberShipId is required" });
-
-    // Lookup plan by numeric sql_id OR MongoDB ID
     const membership = await Membership.findOne({
       $or: [
-        { sql_id: toInt(memberShipId) },
-        { _id: mongoose.Types.ObjectId.isValid(memberShipId) ? memberShipId : new mongoose.Types.ObjectId() }
+        { sql_id: toInt(membership_card_id) },
+        { _id: mongoose.Types.ObjectId.isValid(membership_card_id) ? membership_card_id : new mongoose.Types.ObjectId() }
       ],
       status: 1
     });
@@ -122,8 +107,8 @@ exports.purchaseMembershipCard = async (req, res) => {
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
-      card_status: 0, 
-      payment_status: 1, 
+      card_status: 0,
+      payment_status: 1,
       max_visits: membership.visits,
       razorpay_order_id: razorpayOrder.id,
       paid_amount: membership.price
@@ -132,9 +117,10 @@ exports.purchaseMembershipCard = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "Membership purchase order created successfully", // 🎯 Sync with Flutter Constants
+      // 🎯 CRITICAL: Matches Constants.memberShipPurchaseSuccessMsg
+      message: "Membership card purchased successfully", 
       data: {
-        // 🎯 Matches UI listener: state.memberShipPurchaseModel!.data!.payment!.razorpayOrderId
+        // 🎯 Nested specifically for state.memberShipPurchaseModel!.data!.payment!
         payment: {
           razorpayOrderId: razorpayOrder.id,
           razorpayPublicKey: process.env.RAZORPAY_KEY_ID,
@@ -144,14 +130,12 @@ exports.purchaseMembershipCard = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("🔥 Purchase Error:", error.message);
-    return res.status(500).json({ status: "false", message: "Failed to initialize purchase" });
+    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
 
 /* ---------------------------------------------------
-3️⃣ VERIFY PAYMENT (Completion)
-POST /api/v1/membership-card/verify-payment
+3️⃣ VERIFY PAYMENT (Sync with Verify Logic)
 --------------------------------------------------- */
 exports.verifyMembershipPayment = async (req, res) => {
   try {
@@ -163,16 +147,14 @@ exports.verifyMembershipPayment = async (req, res) => {
       .digest("hex");
 
     if (expected !== razorpay_signature) {
-      return res.status(400).json({ status: "false", message: "Invalid payment signature" });
+      return res.status(400).json({ status: "false", message: "Invalid signature" });
     }
 
     const purchased = await PurchasedMemberCard.findOne({ razorpay_order_id });
-    if (!purchased) return res.status(404).json({ status: "false", message: "Transaction record not found" });
+    if (!purchased) return res.status(404).json({ status: "false", message: "Record not found" });
 
-    const membership = await Membership.findById(purchased.membership_card_id);
-
-    purchased.payment_status = 2; // Paid
-    purchased.card_status = 1;    // Active
+    purchased.payment_status = 2; 
+    purchased.card_status = 1;    
     purchased.start_date = new Date();
     purchased.razorpay_payment_id = razorpay_payment_id;
     purchased.razorpay_signature = razorpay_signature;
@@ -182,50 +164,35 @@ exports.verifyMembershipPayment = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "Membership payment verified successfully" // 🎯 Sync with Flutter Constants
+      // 🎯 CRITICAL: Matches Constants.memberShipVerifyPaymentSuccessMsg
+      message: "Membership card purchased successfully" 
     });
   } catch (error) {
-    console.error("🔥 Verification Error:", error.message);
-    return res.status(500).json({ status: "false", message: "Internal Verification Error" });
+    return res.status(500).json({ status: "false", message: "Verification Error" });
   }
 };
 
 /* ---------------------------------------------------
-4️⃣ GET CURRENT CARD (Profile/Home Display)
-GET /api/v1/membership-card/my-card
+4️⃣ GET CURRENT CARD (Sync with Home Screen)
 --------------------------------------------------- */
 exports.getMyMembershipCard = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
-
-    const card = await PurchasedMemberCard.findOne({
-      user_id: userId,
-      payment_status: 2,
-      card_status: 1
-    })
-    .sort({ createdAt: -1 })
-    .populate("membership_card_id")
-    .lean();
+    const card = await PurchasedMemberCard.findOne({ user_id: userId, payment_status: 2, card_status: 1 })
+      .sort({ createdAt: -1 })
+      .populate("membership_card_id")
+      .lean();
 
     if (!card || !card.membership_card_id) {
       return res.status(200).json({
         status: "true",
         success: true,
         message: "Membership card fetched successfully",
-        data: {
-          id: 1,
-          membership_card_name: "Guest",
-          membership_card_id: 1,
-          membership_card_price: "0",
-          membership_card_description: "Standard Guest Access",
-          membership_card_duration: 0,
-          membership_card_duration_type: 1
-        }
+        data: { id: 1, membership_card_name: "Guest", membership_card_id: 1, membership_card_price: "0" }
       });
     }
 
     const plan = card.membership_card_id;
-
     return res.status(200).json({
       status: "true",
       success: true,
@@ -241,7 +208,6 @@ exports.getMyMembershipCard = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("🔥 My Card API Error:", error.message);
-    return res.status(500).json({ status: "false", message: "Failed to fetch card details" });
+    return res.status(500).json({ status: "false", message: "Error" });
   }
 };
