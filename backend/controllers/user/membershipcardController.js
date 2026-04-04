@@ -10,11 +10,9 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET || "",
 });
 
+
 /* ---------------------------------------------------
-   HELPERS (STRICT TYPE CASTING FOR FLUTTER)
-   --------------------------------------------------- */
-/* ---------------------------------------------------
-   HELPERS - SMART CASTING
+   HELPERS - SMART CASTING & FALLBACKS
    --------------------------------------------------- */
 
 const toInt = (val) => {
@@ -24,11 +22,15 @@ const toInt = (val) => {
 
 const toString = (val) => (val ? String(val) : "");
 
+/**
+ * 🎯 UNIVERSAL PLAN NORMALIZER
+ * Handles missing sql_ids and varying temple field names
+ */
 const normalizeMembershipPlan = (plan = {}) => {
-    // 🎯 If sql_id is missing, we try to extract a number from the timestamp or a fallback
-    // This ensures every plan has a unique integer ID for Flutter's list keys
-    const fallbackId = plan._id ? parseInt(plan._id.toString().substring(0, 8), 16) : 0;
-    const finalId = toInt(plan.sql_id) || fallbackId || 0;
+    // 1. Generate a unique Number if sql_id is missing to prevent 'id: 0'
+    // We use the timestamp part of the MongoDB _id to make a unique integer
+    const mongoIdInt = plan._id ? parseInt(plan._id.toString().substring(0, 8), 16) : 0;
+    const finalId = toInt(plan.sql_id) || mongoIdInt || Math.floor(Math.random() * 1000);
 
     return {
         id: finalId, 
@@ -39,18 +41,20 @@ const normalizeMembershipPlan = (plan = {}) => {
         duration: toInt(plan.duration),
         duration_type: toInt(plan.duration_type),
         status: toInt(plan.status),
-        // 🎯 Improved Temple Mapping
+        // 2. Flexible Temple Mapping
         temples: Array.isArray(plan.temples)
             ? plan.temples.map((t) => ({
-                // Look for temple_id in both possible locations
+                // Checks for both temple_id and templeId
                 temple_id: toString(t.temple_id || t.templeId || ""),
-                // Look for name in both possible locations
-                name: toString(t.temple_name || t.name || ""), 
-                max_visits: toInt(t.max_visits || t.maxVisits)
+                // Checks for both temple_name and name
+                name: toString(t.temple_name || t.name || "Any Temple"), 
+                max_visits: toInt(t.max_visits || t.maxVisits || 0)
             }))
             : [],
     };
 };
+
+
 /* ---------------------------------------------------
 1️⃣ MEMBERSHIP PLAN LIST
 GET /api/v1/membership-card/index
