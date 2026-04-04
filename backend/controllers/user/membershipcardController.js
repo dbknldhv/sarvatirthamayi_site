@@ -443,32 +443,22 @@ exports.verifyMembershipPayment = async (req, res) => {
  * This is the most important fix for the
  * "No membership card" issue in Flutter.
  */
+
+
 exports.getMyMembershipCard = async (req, res) => {
   try {
-    const userId = req.user?.id;
+    const userId = req.user.id;
 
-    if (!userId || !isValidObjectId(userId)) {
-      return res.status(401).json({
-        status: "false",
-        success: false,
-        message: "Unauthorized",
-        data: {},
-      });
-    }
-
-    let purchasedCard = await PurchasedMemberCard.findOne({
-      user_id: toObjectId(userId),
+    const card = await PurchasedMemberCard.findOne({
+      user_id: userId,
       payment_status: 2,
+      card_status: 1
     })
-      .sort({ createdAt: -1, created_at: -1, _id: -1 })
-      .populate("membership_card_id")
-      .exec();
+    .sort({ createdAt: -1 })
+    .populate("membership_card_id");
 
-    if (purchasedCard) {
-      purchasedCard = await expireCardIfNeeded(purchasedCard);
-    }
-
-    if (!purchasedCard || purchasedCard.card_status !== 1) {
+    // If user has no membership → return Guest
+    if (!card) {
       return res.status(200).json({
         status: "true",
         success: true,
@@ -477,50 +467,32 @@ exports.getMyMembershipCard = async (req, res) => {
           id: 1,
           membership_card_name: "Guest",
           membership_card_id: 1,
-          membership_card_price: "0",
-          name: "Guest",
-          description: "",
-          visits: 0,
-          price: "0",
-          duration: 0,
-          duration_type: 0,
-          card_status: 0,
-          payment_status: 0,
-          max_visits: 0,
-          used_visits: 0,
-          remaining_visits: 0,
-          start_date: null,
-          end_date: null,
-          temples: [],
-        },
+          membership_card_price: "0"
+        }
       });
     }
 
-    const membership = purchasedCard.membership_card_id;
-    const templeUsage = await PurchasedMemberCardTemple.find({
-      user_id: toObjectId(userId),
-      purchased_member_card_id: purchasedCard._id,
-    }).lean();
-
-    const mapped = normalizePurchasedMembershipForFlutter(
-      purchasedCard.toObject(),
-      membership?.toObject ? membership.toObject() : membership,
-      templeUsage
-    );
+    const plan = card.membership_card_id;
 
     return res.status(200).json({
       status: "true",
       success: true,
       message: "Membership card fetched successfully",
-      data: mapped,
+      data: {
+        id: plan.sql_id || 1,
+        membership_card_name: plan.name || "",
+        membership_card_id: plan.sql_id || 1,
+        membership_card_price: String(plan.price || "0")
+      }
     });
+
   } catch (error) {
     console.error("getMyMembershipCard error:", error);
+
     return res.status(500).json({
       status: "false",
       success: false,
-      message: "Failed to fetch membership card",
-      data: {},
+      message: "Failed to fetch membership card"
     });
   }
 };
