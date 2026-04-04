@@ -58,6 +58,7 @@ exports.getActiveMemberships = async (req, res) => {
       Membership.countDocuments({ status: 1 }),
     ]);
 
+    // 🎯 Use our type-safe mapper
     const mapped = plans.map(normalizeMembershipPlan);
 
     return res.status(200).json({
@@ -65,21 +66,35 @@ exports.getActiveMemberships = async (req, res) => {
       success: true,
       message: "api.member_ship_card_success",
       data: {
-        data: mapped, // This is what the UI loops through
-        total_count: totalCount, // Expected by Flutter Model
-        is_next: totalCount > page * limit, // Expected by Flutter Model
-        is_prev: page > 1, // Expected by Flutter Model
+        // This MUST be the list for Flutter: List<MemberShip>? data;
+        data: mapped, 
+        
+        // 🎯 THESE ARE THE MISSING KEYS PREVENTING THE INDEX FROM LOADING:
+        total_count: totalCount,
+        is_next: totalCount > page * limit,
+        is_prev: page > 1,
         total_pages: Math.ceil(totalCount / limit),
         current_page: page,
         per_page: limit,
-        next_page_url: totalCount > page * limit ? `membership-card/index?page=${page + 1}` : null,
-        prev_page_url: page > 1 ? `membership-card/index?page=${page - 1}` : null,
+        from: skip + 1,
+        to: skip + mapped.length,
+        next_page_url: totalCount > page * limit ? `${req.protocol}://${req.get('host')}/api/v1/membership-card/index?page=${page + 1}` : null,
+        prev_page_url: page > 1 ? `${req.protocol}://${req.get('host')}/api/v1/membership-card/index?page=${page - 1}` : null,
+        path: "/api/v1/membership-card/index",
+        has_pages: totalCount > limit,
+        links: [
+           { url: null, label: "&laquo; Previous", active: false },
+           { url: "active", label: "1", active: true },
+           { url: null, label: "Next &raquo;", active: false }
+        ]
       },
     });
   } catch (error) {
-    return res.status(500).json({ status: "false", message: "Server Error" });
+    console.error("🔥 Deep Track Error:", error);
+    return res.status(500).json({ status: "false", message: "Server Error", data: { data: [] } });
   }
 };
+
 
 
 
