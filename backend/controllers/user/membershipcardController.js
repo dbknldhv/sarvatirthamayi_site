@@ -171,3 +171,51 @@ exports.verifyMembershipPayment = async (req, res) => {
     return res.status(500).json({ status: "false", message: "Verification Error" });
   }
 };
+
+
+/* ---------------------------------------------------
+4️⃣ GET CURRENT CARD (Required for Profile/Dashboard)
+--------------------------------------------------- */
+exports.getMyMembershipCard = async (req, res) => {
+  try {
+    const userId = req.user._id || req.user.id;
+
+    const card = await PurchasedMemberCard.findOne({
+      user_id: userId,
+      payment_status: 2,
+      card_status: 1
+    })
+    .sort({ createdAt: -1 })
+    .populate("membership_card_id")
+    .lean();
+
+    if (!card || !card.membership_card_id) {
+      return res.status(200).json({
+        status: "true",
+        success: true,
+        data: {
+          id: 1,
+          membership_card_name: "Guest",
+          membership_card_id: 1,
+          membership_card_price: "0"
+        }
+      });
+    }
+
+    const plan = card.membership_card_id;
+
+    return res.status(200).json({
+      status: "true",
+      success: true,
+      data: {
+        id: toInt(plan.sql_id) || 1,
+        membership_card_name: toString(plan.name),
+        membership_card_id: toInt(plan.sql_id) || 1,
+        membership_card_price: toString(plan.price)
+      }
+    });
+  } catch (error) {
+    console.error("🔥 My Card Error:", error);
+    return res.status(500).json({ status: "false", message: "Failed to fetch card" });
+  }
+};
