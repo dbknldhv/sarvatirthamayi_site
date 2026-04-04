@@ -80,55 +80,45 @@ exports.getActiveMemberships = async (req, res) => {
 };
 
 /* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Refactored for Stability)
+2️⃣ PURCHASE MEMBERSHIP (Fixed for Unique Index Crash)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // 🎯 FIX: Capture ID from either possible key name
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    if (!rawId) {
-      return res.status(400).json({ status: "false", message: "Membership ID is missing" });
-    }
+    if (!rawId) return res.status(400).json({ status: "false", message: "ID missing" });
 
-    /**
-     * 🎯 DATABASE LOOKUP:
-     * We check both the integer sql_id (1) and the MongoDB _id.
-     * This prevents the 500 error if the app sends an integer.
-     */
-    const query = { status: 1 };
+    // 🎯 ID Safety Lookup
+    let query = { status: 1 };
     if (mongoose.Types.ObjectId.isValid(rawId)) {
       query._id = rawId;
     } else {
-      query.$or = [{ sql_id: toInt(rawId) }, { id: toInt(rawId) }];
+      const numericId = toInt(rawId);
+      query.$or = [{ sql_id: numericId }, { id: numericId }];
     }
 
     const membership = await Membership.findOne(query);
+    if (!membership) return res.status(404).json({ status: "false", message: "Plan not found" });
 
-    if (!membership) {
-      console.error(`❌ Plan not found for ID: ${rawId}`);
-      return res.status(404).json({ status: "false", message: "Plan not found" });
-    }
-
-    // Razorpay Integration
     const amountInPaise = Math.round(Number(membership.price) * 100);
     
-    // Safety check: Razorpay fails if amount is 0
-    if (amountInPaise <= 0) {
-        return res.status(400).json({ status: "false", message: "Invalid plan price" });
-    }
-
+    // Create Razorpay Order
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    // Create the purchase record
+    /**
+     * 🎯 THE FIX FOR E11000 ERROR:
+     * We add a unique 'sql_id' based on the timestamp to satisfy 
+     * the unique index requirement in your MongoDB collection.
+     */
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
+      sql_id: Date.now(), // 👈 Fixes the 'dup key: { sql_id: null }' error
       card_status: 0,
       payment_status: 1,
       max_visits: membership.visits,
@@ -139,7 +129,6 @@ exports.purchaseMembershipCard = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      // 🎯 MESSAGE SYNC: Matches Constants.memberShipVerifyPaymentSuccessMsg
       message: "Membership card purchased successfully", 
       data: {
         payment: {
@@ -152,16 +141,10 @@ exports.purchaseMembershipCard = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("🔥 Purchase Controller Crash:", error.message);
-    return res.status(500).json({ 
-      status: "false", 
-      message: "Purchase initialization failed",
-      error: error.message 
-    });
+    console.error("🔥 Duplicate Key Crash Fixed:", error.message);
+    return res.status(500).json({ status: "false", message: error.message });
   }
 };
-
-
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Production Ready & Sync with Flutter)
 --------------------------------------------------- */
