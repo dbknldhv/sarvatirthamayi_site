@@ -225,22 +225,7 @@ exports.getActiveMemberships = async (req, res) => {
       status: "true",
       success: true,
       message: "api.member_ship_card_success",
-      data: {
-        data: mappedPlans,
-        total_count: mappedPlans.length,
-        is_next: false,
-        is_prev: false,
-        total_pages: 1,
-        current_page: 1,
-        per_page: mappedPlans.length,
-        from: mappedPlans.length ? 1 : 0,
-        to: mappedPlans.length,
-        next_page_url: null,
-        prev_page_url: null,
-        path: req.originalUrl,
-        has_pages: false,
-        links: [],
-      },
+      data: mappedPlans,
     });
   } catch (error) {
     console.error("getActiveMemberships error:", error);
@@ -249,7 +234,6 @@ exports.getActiveMemberships = async (req, res) => {
     });
   }
 };
-
 /**
  * --------------------------------
  * 2. Create Razorpay Order
