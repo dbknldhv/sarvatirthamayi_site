@@ -3,6 +3,8 @@ const crypto = require("crypto");
 const Razorpay = require("razorpay");
 
 const PurchasedMemberCard = require("../../models/PurchasedMemberCard");
+const PurchasedMemberCardTemple = require("../../models/PurchasedMemberCardTemple");
+const CardFavoriteTemple = require("../../models/CardFavoriteTemple");
 const User = require("../../models/User");
 const Membership = require("../../models/Membership");
 
@@ -586,38 +588,41 @@ exports.verifyAndActivateMembership = async (req, res) => {
  */
 exports.getMyMembershipCard = async (req, res) => {
   try {
-    if (!req.user || !req.user.id) {
-      return sendError(res, 401, "User not authorized");
+
+    const userId = req.user.sql_id;
+
+    const membership = await PurchasedMemberCard.findOne({
+      user_id: userId,
+      payment_status: 2
+    });
+
+    if (!membership) {
+      return res.json({
+        status: "false",
+        message: "Membership not found"
+      });
     }
 
-    const myCard = await PurchasedMemberCard.findOne({
-      user_id: req.user.id,
-      payment_status: 2,
-      card_status: 1,
-    })
-      .populate("membership_card_id")
-      .sort({ createdAt: -1, created_at: -1, _id: -1 })
-      .lean();
+    const templeUsage = await PurchasedMemberCardTemple.find({
+      purchased_member_card_id: membership.sql_id
+    });
 
-    if (!myCard) {
-      return sendSuccess(
-        res,
-        "Membership details fetched successfully",
-        null
-      );
-    }
+    const favorites = await CardFavoriteTemple.find({
+      purchased_member_card_id: membership.sql_id
+    });
 
-    const plan = myCard.membership_card_id || null;
+    return res.json({
+      status: "true",
+      membership,
+      temples: templeUsage,
+      favorites
+    });
 
-    return sendSuccess(
-      res,
-      "Membership details fetched successfully",
-      normalizePurchasedCardForFlutter(myCard, plan)
-    );
   } catch (error) {
-    console.error("getMyMembershipCard error:", error);
-    return sendError(res, 500, "Failed to fetch membership details", {
-      error: error.message,
+    console.error(error);
+    res.status(500).json({
+      status: "false",
+      message: "Server error"
     });
   }
 };
