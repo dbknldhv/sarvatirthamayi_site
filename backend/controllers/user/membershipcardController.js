@@ -80,30 +80,52 @@ exports.getActiveMemberships = async (req, res) => {
 };
 
 /* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Sync with Razorpay UI Logic)
+2️⃣ PURCHASE MEMBERSHIP (Refactored for Stability)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    const { membership_card_id } = req.body; 
+    // 🎯 FIX: Capture ID from either possible key name
+    const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    const membership = await Membership.findOne({
-      $or: [
-        { sql_id: toInt(membership_card_id) },
-        { _id: mongoose.Types.ObjectId.isValid(membership_card_id) ? membership_card_id : new mongoose.Types.ObjectId() }
-      ],
-      status: 1
-    });
+    if (!rawId) {
+      return res.status(400).json({ status: "false", message: "Membership ID is missing" });
+    }
 
-    if (!membership) return res.status(404).json({ status: "false", message: "Plan not found" });
+    /**
+     * 🎯 DATABASE LOOKUP:
+     * We check both the integer sql_id (1) and the MongoDB _id.
+     * This prevents the 500 error if the app sends an integer.
+     */
+    const query = { status: 1 };
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      query._id = rawId;
+    } else {
+      query.$or = [{ sql_id: toInt(rawId) }, { id: toInt(rawId) }];
+    }
 
+    const membership = await Membership.findOne(query);
+
+    if (!membership) {
+      console.error(`❌ Plan not found for ID: ${rawId}`);
+      return res.status(404).json({ status: "false", message: "Plan not found" });
+    }
+
+    // Razorpay Integration
     const amountInPaise = Math.round(Number(membership.price) * 100);
+    
+    // Safety check: Razorpay fails if amount is 0
+    if (amountInPaise <= 0) {
+        return res.status(400).json({ status: "false", message: "Invalid plan price" });
+    }
+
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
+    // Create the purchase record
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
@@ -117,10 +139,9 @@ exports.purchaseMembershipCard = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      // 🎯 CRITICAL: Matches Constants.memberShipPurchaseSuccessMsg
+      // 🎯 MESSAGE SYNC: Matches Constants.memberShipVerifyPaymentSuccessMsg
       message: "Membership card purchased successfully", 
       data: {
-        // 🎯 Nested specifically for state.memberShipPurchaseModel!.data!.payment!
         payment: {
           razorpayOrderId: razorpayOrder.id,
           razorpayPublicKey: process.env.RAZORPAY_KEY_ID,
@@ -129,32 +150,58 @@ exports.purchaseMembershipCard = async (req, res) => {
         purchased_member_card_id: purchased._id
       }
     });
+
   } catch (error) {
-    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
+    console.error("🔥 Purchase Controller Crash:", error.message);
+    return res.status(500).json({ 
+      status: "false", 
+      message: "Purchase initialization failed",
+      error: error.message 
+    });
   }
 };
 
+
 /* ---------------------------------------------------
-3️⃣ VERIFY PAYMENT (Sync with Verify Logic)
+3️⃣ VERIFY PAYMENT (Production Ready & Sync with Flutter)
 --------------------------------------------------- */
 exports.verifyMembershipPayment = async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    /**
+     * 🎯 FIX 1: Handle both Snake Case (Postman) and Camel Case (Razorpay Flutter SDK)
+     * Flutter usually sends: razorPayPaymentId, razorPayOrderId, razorPaySignature
+     */
+    const razorpay_order_id = req.body.razorpay_order_id || req.body.razorPayOrderId;
+    const razorpay_payment_id = req.body.razorpay_payment_id || req.body.razorPayPaymentId;
+    const razorpay_signature = req.body.razorpay_signature || req.body.razorPaySignature;
 
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ 
+        status: "false", 
+        message: "Missing required payment verification fields" 
+      });
+    }
+
+    // Verify HMAC Signature
     const expected = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
     if (expected !== razorpay_signature) {
+      console.error("❌ Invalid Signature detected");
       return res.status(400).json({ status: "false", message: "Invalid signature" });
     }
 
+    // Find the record
     const purchased = await PurchasedMemberCard.findOne({ razorpay_order_id });
-    if (!purchased) return res.status(404).json({ status: "false", message: "Record not found" });
+    if (!purchased) {
+      return res.status(404).json({ status: "false", message: "Purchase record not found" });
+    }
 
-    purchased.payment_status = 2; 
-    purchased.card_status = 1;    
+    // Update Status
+    purchased.payment_status = 2; // Paid
+    purchased.card_status = 1;    // Active
     purchased.start_date = new Date();
     purchased.razorpay_payment_id = razorpay_payment_id;
     purchased.razorpay_signature = razorpay_signature;
@@ -164,11 +211,15 @@ exports.verifyMembershipPayment = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      // 🎯 CRITICAL: Matches Constants.memberShipVerifyPaymentSuccessMsg
+      /**
+       * 🎯 FIX 2: Matching Constants.memberShipVerifyPaymentSuccessMsg in strings.dart
+       * Based on your strings.dart, this MUST be exactly:
+       */
       message: "Membership card purchased successfully" 
     });
   } catch (error) {
-    return res.status(500).json({ status: "false", message: "Verification Error" });
+    console.error("🔥 verification Error:", error.message);
+    return res.status(500).json({ status: "false", message: "Internal Verification Error" });
   }
 };
 
