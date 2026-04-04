@@ -13,36 +13,44 @@ const razorpay = new Razorpay({
 /* ---------------------------------------------------
    HELPERS (STRICT TYPE CASTING FOR FLUTTER)
    --------------------------------------------------- */
+/* ---------------------------------------------------
+   HELPERS - SMART CASTING
+   --------------------------------------------------- */
 
 const toInt = (val) => {
-  const n = parseInt(val);
-  return isNaN(n) ? 0 : n;
+    const n = parseInt(val);
+    return isNaN(n) ? 0 : n;
 };
 
 const toString = (val) => (val ? String(val) : "");
 
-/**
- * 🎯 Format for MembershipCardModel in Flutter
- */
-const normalizeMembershipPlan = (plan = {}) => ({
-  // CRITICAL: Flutter int? cannot take a String _id. Must use sql_id.
-  id: toInt(plan.sql_id), 
-  name: toString(plan.name),
-  description: toString(plan.description),
-  visits: toInt(plan.visits),
-  price: toString(plan.price), // Flutter usually expects price as String for display
-  duration: toInt(plan.duration),
-  duration_type: toInt(plan.duration_type),
-  status: toInt(plan.status),
-  temples: Array.isArray(plan.temples)
-    ? plan.temples.map((t) => ({
-        temple_id: toString(t.temple_id),
-        name: toString(t.temple_name), // Using the field from your Schema
-        max_visits: toInt(t.max_visits),
-      }))
-    : [],
-});
+const normalizeMembershipPlan = (plan = {}) => {
+    // 🎯 If sql_id is missing, we try to extract a number from the timestamp or a fallback
+    // This ensures every plan has a unique integer ID for Flutter's list keys
+    const fallbackId = plan._id ? parseInt(plan._id.toString().substring(0, 8), 16) : 0;
+    const finalId = toInt(plan.sql_id) || fallbackId || 0;
 
+    return {
+        id: finalId, 
+        name: toString(plan.name),
+        description: toString(plan.description),
+        visits: toInt(plan.visits),
+        price: toString(plan.price),
+        duration: toInt(plan.duration),
+        duration_type: toInt(plan.duration_type),
+        status: toInt(plan.status),
+        // 🎯 Improved Temple Mapping
+        temples: Array.isArray(plan.temples)
+            ? plan.temples.map((t) => ({
+                // Look for temple_id in both possible locations
+                temple_id: toString(t.temple_id || t.templeId || ""),
+                // Look for name in both possible locations
+                name: toString(t.temple_name || t.name || ""), 
+                max_visits: toInt(t.max_visits || t.maxVisits)
+            }))
+            : [],
+    };
+};
 /* ---------------------------------------------------
 1️⃣ MEMBERSHIP PLAN LIST
 GET /api/v1/membership-card/index
