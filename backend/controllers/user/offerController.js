@@ -19,16 +19,19 @@ const getOffers = async (req, res) => {
       .limit(perPage)
       .lean();
 
-    const userId = req.user?._id || req.user?.id || null;
+    const userSqlId = Number(req.user?.sql_id || 0);
     let favoriteSet = new Set();
 
-    if (userId && offers.length > 0) {
-      const referenceIds = offers.map((item) => Number(item.reference_id)).filter(Boolean);
+    if (userSqlId > 0 && offers.length > 0) {
+      const referenceIds = offers
+        .map((item) => Number(item.reference_id))
+        .filter(Boolean);
 
       const favoriteDocs = await Favorite.find({
-        user_id: userId,
+        user_id: userSqlId,
         type: 6,
         reference_id: { $in: referenceIds },
+        status: 1,
       }).lean();
 
       favoriteSet = new Set(
@@ -37,24 +40,23 @@ const getOffers = async (req, res) => {
     }
 
     const formattedOffers = offers.map((o) => ({
-  id: parseInt(o.sql_id) || 0,
-  temple_id: o.temple_id || 0,
-  name: o.name || "",
-  description: o.description || "",
-
-  discount_percentage: Number(o.discount_percentage ?? 0),
-
-  discount_amount:
-    o.discount_amount != null
-      ? Number(o.discount_amount)
-      : Number(o.discount_percentage ?? 0),
-
-  type: o.type || 0,
-  reference_id: o.reference_id || 0,
-  is_favorite: favoriteOfferSet.has(Number(o.reference_id)) ? 1 : 0,
-  image: formatImageUrl(o.image),
-  image_thumb: formatImageUrl(o.image),
-}));
+      id: parseInt(o.sql_id) || 0,
+      temple_id: Number(o.temple_id || 0),
+      name: o.name || "",
+      description: o.description || "",
+      discount_percentage: Number(o.discount_percentage ?? 0),
+      discount_amount:
+        o.discount_amount != null
+          ? Number(o.discount_amount)
+          : Number(o.discount_percentage ?? 0),
+      type: Number(o.type || 0),
+      reference_id: Number(o.reference_id || 0),
+      status: Number(o.status || 0),
+      sequence: Number(o.sequence || 0),
+      is_favorite: favoriteSet.has(Number(o.reference_id)) ? 1 : 0,
+      image: formatImageUrl(o.image),
+      image_thumb: formatImageUrl(o.image),
+    }));
 
     const totalPages = totalCount > 0 ? Math.ceil(totalCount / perPage) : 1;
     const isNext = page < totalPages;
@@ -117,14 +119,15 @@ const getOfferById = async (req, res) => {
       });
     }
 
-    const userId = req.user?._id || req.user?.id || null;
+    const userSqlId = Number(req.user?.sql_id || 0);
     let isFavorite = 0;
 
-    if (userId) {
+    if (userSqlId > 0) {
       const favoriteExists = await Favorite.exists({
-        user_id: userId,
+        user_id: userSqlId,
         type: 6,
         reference_id: Number(offer.reference_id),
+        status: 1,
       });
 
       isFavorite = favoriteExists ? 1 : 0;
@@ -134,21 +137,22 @@ const getOfferById = async (req, res) => {
       status: "true",
       message: "Offer fetched successfully",
       data: {
-        id: offer.sql_id || 0,
-        temple_id: offer.temple_id || 0,
+        id: Number(offer.sql_id || 0),
+        temple_id: Number(offer.temple_id || 0),
         name: offer.name || "",
         description: offer.description || "",
-        discount_percentage: offer.discount_percentage ?? 0,
+        discount_percentage: Number(offer.discount_percentage ?? 0),
         discount_amount:
           offer.discount_amount != null
-            ? offer.discount_amount
-            : (offer.discount_percentage ?? 0),
-        type: offer.type || 0,
-        reference_id: offer.reference_id || 0,
-        status: offer.status || 0,
-        sequence: offer.sequence || 0,
+            ? Number(offer.discount_amount)
+            : Number(offer.discount_percentage ?? 0),
+        type: Number(offer.type || 0),
+        reference_id: Number(offer.reference_id || 0),
+        status: Number(offer.status || 0),
+        sequence: Number(offer.sequence || 0),
         is_favorite: isFavorite,
         image: formatImageUrl(offer.image),
+        image_thumb: formatImageUrl(offer.image),
       },
     });
   } catch (error) {
