@@ -225,16 +225,21 @@ exports.getActiveMemberships = async (req, res) => {
       status: "true",
       success: true,
       message: "api.member_ship_card_success",
-      data: mappedPlans,
+      data: {
+        data: mappedPlans
+      }
     });
+
   } catch (error) {
     console.error("getActiveMemberships error:", error);
-    return sendError(res, 500, "Failed to fetch membership plans", {
-      error: error.message,
+    return res.status(500).json({
+      status: "false",
+      success: false,
+      message: "Failed to fetch membership plans",
+      error: error.message
     });
   }
-};
-/**
+};/**
  * --------------------------------
  * 2. Create Razorpay Order
  * POST /membership-card/purchase
