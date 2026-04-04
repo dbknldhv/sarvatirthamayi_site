@@ -1,27 +1,48 @@
 const mongoose = require("mongoose");
+const crypto = require("crypto");
+const Razorpay = require("razorpay");
+
 const PurchasedMemberCard = require("../../models/PurchasedMemberCard");
 const User = require("../../models/User");
 const Membership = require("../../models/Membership");
-const Razorpay = require("razorpay");
-const crypto = require("crypto");
+
 const { generateMembershipCertificate } = require("../../utils/pdfGenerator");
 const mailSender = require("../../utils/mailSender");
 
 /**
- * Razorpay Instance Helper
+ * -----------------------------
+ * Helpers
+ * -----------------------------
  */
-const getRazorpayInstance = () => {
-  const key_id = process.env.RAZORPAY_KEY_ID;
-  const key_secret = process.env.RAZORPAY_KEY_SECRET;
-  if (!key_id || !key_secret) return null;
-  return new Razorpay({ key_id, key_secret });
-};
 
-const sendError = (res, statusCode, message) => {
+const sendError = (res, statusCode, message, extra = {}) => {
   return res.status(statusCode).json({
     status: "false",
     success: false,
     message,
+    ...extra,
+  });
+};
+
+const sendSuccess = (res, message, data = null, extra = {}) => {
+  return res.status(200).json({
+    status: "true",
+    success: true,
+    message,
+    data,
+    ...extra,
+  });
+};
+
+const getRazorpayInstance = () => {
+  const key_id = process.env.RAZORPAY_KEY_ID;
+  const key_secret = process.env.RAZORPAY_KEY_SECRET;
+
+  if (!key_id || !key_secret) return null;
+
+  return new Razorpay({
+    key_id,
+    key_secret,
   });
 };
 
@@ -29,6 +50,11 @@ const toNumberOrNull = (value) => {
   if (value === undefined || value === null || value === "") return null;
   const n = Number(value);
   return Number.isNaN(n) ? null : n;
+};
+
+const safeString = (value, fallback = "") => {
+  if (value === undefined || value === null) return fallback;
+  return String(value);
 };
 
 const getSourceValue = (source, ...keys) => {
@@ -44,31 +70,187 @@ const getSourceValue = (source, ...keys) => {
   return null;
 };
 
-const findMembershipPlan = async (planId) => {
-  if (!planId) return null;
+const generateStableNumericId = (doc) => {
+  if (!doc) return 0;
 
-  const numericPlanId = toNumberOrNull(planId);
+  if (doc.sql_id !== undefined && doc.sql_id !== null && doc.sql_id !== "") {
+    const n = Number(doc.sql_id);
+    if (!Number.isNaN(n) && n > 0) return n;
+  }
+
+  if (doc._id) {
+    try {
+      return parseInt(String(doc._id).slice(-6), 16);
+    } catch (error) {
+      return 0;
+    }
+  }
+
+  return 0;
+};
+
+const isObjectId = (value) => mongoose.isValidObjectId(String(value));
+
+const normalizeDate = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+};
+
+const normalizePriceString = (value) => {
+  const n = Number(value || 0);
+  if (Number.isNaN(n)) return "0";
+  return String(n);
+};
+
+const buildMembershipLookup = (planId) => {
   const orConditions = [];
 
+  const numericPlanId = toNumberOrNull(planId);
   if (numericPlanId !== null) {
     orConditions.push({ sql_id: numericPlanId });
   }
 
-  if (mongoose.isValidObjectId(String(planId))) {
+  if (isObjectId(planId)) {
     orConditions.push({ _id: planId });
   }
 
-  if (orConditions.length === 0) return null;
+  return orConditions;
+};
+
+const findMembershipPlan = async (planId) => {
+  if (!planId) return null;
+
+  const orConditions = buildMembershipLookup(planId);
+  if (!orConditions.length) return null;
 
   return Membership.findOne({
     $or: orConditions,
     status: 1,
-  });
+  }).lean();
+};
+
+const calculateEndDate = (startDate, duration, durationType) => {
+  const start = new Date(startDate);
+  const end = new Date(start);
+
+  const safeDuration = Number(duration || 1);
+  const safeDurationType = Number(durationType || 1);
+
+  if (safeDurationType === 2) {
+    end.setFullYear(end.getFullYear() + safeDuration);
+  } else {
+    end.setMonth(end.getMonth() + safeDuration);
+  }
+
+  return end;
+};
+
+const normalizeMembershipPlanForFlutter = (plan) => {
+  const id = generateStableNumericId(plan);
+
+  return {
+    id,
+    name: safeString(plan?.name),
+    description: safeString(plan?.description),
+    visits: Number(plan?.visits || 0),
+    price: normalizePriceString(plan?.price),
+    duration: Number(plan?.duration || 1),
+    duration_type: Number(plan?.duration_type || 1),
+    status: Number(plan?.status || 1),
+
+    // Optional extra info for future use.
+    // Flutter can ignore unknown keys safely.
+    temples: Array.isArray(plan?.temples)
+      ? plan.temples.map((item) => ({
+          temple_id: item?.templeId
+            ? safeString(item.templeId)
+            : safeString(item?.temple_id),
+          name: safeString(item?.name),
+          max_visits: Number(item?.maxVisits || item?.max_visits || 0),
+        }))
+      : [],
+  };
+};
+
+const normalizePurchasedCardForFlutter = (card, plan) => {
+  return {
+    id: generateStableNumericId(card),
+    membership_card_id: generateStableNumericId(plan),
+    membership_card_name: safeString(plan?.name),
+    membership_card_amount: normalizePriceString(
+      card?.membership_card_amount ?? plan?.price ?? 0
+    ),
+    paid_amount: normalizePriceString(card?.paid_amount ?? plan?.price ?? 0),
+    start_date: normalizeDate(card?.start_date),
+    end_date: normalizeDate(card?.end_date),
+    payment_status: Number(card?.payment_status || 0),
+    max_visits: Number(card?.max_visits || 0),
+    used_visits: Number(card?.used_visits || 0),
+  };
+};
+
+const findActivePurchasedMembership = async (userId) => {
+  const now = new Date();
+
+  return PurchasedMemberCard.findOne({
+    user_id: userId,
+    payment_status: 2,
+    card_status: 1,
+    end_date: { $gte: now },
+  })
+    .sort({ created_at: -1, _id: -1 })
+    .populate("membership_card_id")
+    .lean();
 };
 
 /**
- * 1. Create Razorpay Order for Membership
- * Triggered by Flutter purchase event
+ * -----------------------------
+ * 1. Get active membership plans
+ * GET /membership-card/index
+ * -----------------------------
+ *
+ * Flutter expects a paginated-like object inside data.
+ */
+exports.getActiveMemberships = async (req, res) => {
+  try {
+    const plans = await Membership.find({ status: 1 })
+      .sort({ price: 1, createdAt: 1, created_at: 1, _id: 1 })
+      .lean();
+
+    const mappedPlans = plans.map(normalizeMembershipPlanForFlutter);
+
+    return sendSuccess(
+      res,
+      "api.member_ship_card_success",
+      {
+        data: mappedPlans,
+        total_count: mappedPlans.length,
+        is_next: false,
+        is_prev: false,
+        total_pages: 1,
+        current_page: 1,
+        per_page: mappedPlans.length,
+        from: mappedPlans.length ? 1 : 0,
+        to: mappedPlans.length,
+        next_page_url: null,
+        prev_page_url: null,
+        path: req.originalUrl,
+        has_pages: false,
+        links: [],
+      }
+    );
+  } catch (error) {
+    console.error("getActiveMemberships error:", error);
+    return sendError(res, 500, "Failed to fetch membership plans");
+  }
+};
+
+/**
+ * -----------------------------
+ * 2. Create Razorpay order
+ * POST /membership-card/purchase
+ * -----------------------------
  */
 exports.createMembershipOrder = async (req, res) => {
   try {
@@ -79,64 +261,93 @@ exports.createMembershipOrder = async (req, res) => {
       "memberShipCardId",
       "membership_card_id",
       "membershipCardId",
+      "memberShipId",
       "planId",
       "plan_id",
-      "memberShipId"
+      "id"
     );
 
     if (!planId) {
       return sendError(res, 400, "Membership plan ID is required");
     }
 
-    const rzp = getRazorpayInstance();
-    if (!rzp) {
+    const razorpay = getRazorpayInstance();
+    if (!razorpay) {
       return sendError(res, 500, "Payment Gateway Config Missing");
     }
 
     const plan = await findMembershipPlan(planId);
     if (!plan) {
-      return sendError(res, 404, "Selected plan not found");
+      return sendError(res, 404, "Selected membership plan not found");
     }
 
-    const options = {
-      amount: Math.round(Number(plan.price || 0) * 100),
+    const planNumericId = generateStableNumericId(plan);
+    const planPrice = Number(plan.price || 0);
+
+    if (planPrice <= 0) {
+      return sendError(res, 400, "Invalid membership plan amount");
+    }
+
+    // Optional production protection:
+    // Prevent duplicate active plan purchase
+    const existingActive = await findActivePurchasedMembership(req.user.id);
+
+    if (
+      existingActive &&
+      existingActive.membership_card_id &&
+      generateStableNumericId(existingActive.membership_card_id) === planNumericId
+    ) {
+      return sendError(
+        res,
+        409,
+        "You already have an active membership for this plan"
+      );
+    }
+
+    const order = await razorpay.orders.create({
+      amount: Math.round(planPrice * 100),
       currency: "INR",
-      receipt: `mem_${plan.sql_id || plan._id}_${Date.now()}`,
-    };
+      receipt: `mem_${planNumericId}_${Date.now()}`,
+      notes: {
+        user_id: safeString(req.user.id),
+        membership_plan_id: safeString(planNumericId),
+        membership_name: safeString(plan.name),
+      },
+    });
 
-    const order = await rzp.orders.create(options);
-
-    // Keep same Flutter message contract
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "api.member_ship_purchase_success",
-      data: {
-        id: Number(plan.sql_id || 0),
-        membership_card_id: Number(plan.sql_id || 0),
-        amount: String(plan.price || 0),
-        paid_amount: String(plan.price || 0),
-        membership_card_amount: String(plan.price || 0),
+    return sendSuccess(
+      res,
+      "api.member_ship_purchase_success",
+      {
+        id: planNumericId,
+        membership_card_id: planNumericId,
+        amount: normalizePriceString(planPrice),
+        paid_amount: normalizePriceString(planPrice),
+        membership_card_amount: normalizePriceString(planPrice),
         payment: {
-          razorpay_order_id: String(order.id || ""),
+          razorpay_order_id: safeString(order?.id),
           razorpay_payment_id: "",
-          razorpay_public_key: String(process.env.RAZORPAY_KEY_ID || ""),
+          razorpay_public_key: safeString(process.env.RAZORPAY_KEY_ID),
           payment_status: 1,
           payment_type: 2,
           payment_date: "",
         },
       },
-      plan_id: String(plan._id),
-    });
+      {
+        plan_id: safeString(plan._id),
+      }
+    );
   } catch (error) {
-    console.error("Membership createMembershipOrder error:", error);
-    return sendError(res, 500, error.message);
+    console.error("createMembershipOrder error:", error);
+    return sendError(res, 500, "Failed to create membership order");
   }
 };
 
 /**
- * 2. Verify Payment & Activate Membership
- * Triggered by Flutter verify event
+ * -----------------------------
+ * 3. Verify payment and activate membership
+ * POST /membership-card/verify-payment
+ * -----------------------------
  */
 exports.verifyAndActivateMembership = async (req, res) => {
   try {
@@ -165,40 +376,64 @@ exports.verifyAndActivateMembership = async (req, res) => {
       "memberShipCardId",
       "membership_card_id",
       "membershipCardId",
-      "memberShipId"
+      "memberShipId",
+      "id"
     );
 
     if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
       return sendError(res, 400, "Missing payment verification details");
     }
 
-    const generated_signature = crypto
+    if (!process.env.RAZORPAY_KEY_SECRET) {
+      return sendError(res, 500, "Payment Gateway Config Missing");
+    }
+
+    const generatedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    if (generated_signature !== razorpay_signature) {
+    if (generatedSignature !== razorpay_signature) {
       return sendError(res, 400, "Invalid Signature");
+    }
+
+    // Prevent duplicate activation on same payment id
+    const existingPayment = await PurchasedMemberCard.findOne({
+      razorpay_payment_id,
+      payment_status: 2,
+    }).lean();
+
+    if (existingPayment) {
+      const populatedExisting = await PurchasedMemberCard.findById(
+        existingPayment._id
+      )
+        .populate("membership_card_id")
+        .lean();
+
+      const existingPlan = populatedExisting?.membership_card_id || null;
+
+      return sendSuccess(
+        res,
+        "api.member_ship_verify_payment_success",
+        normalizePurchasedCardForFlutter(populatedExisting, existingPlan)
+      );
     }
 
     let plan = null;
 
-    // Prefer explicit plan_id if Flutter sends it
     if (planId) {
       plan = await findMembershipPlan(planId);
     }
 
-    // Fallback: derive from Razorpay order receipt
     if (!plan) {
-      const rzp = getRazorpayInstance();
-      if (!rzp) {
+      const razorpay = getRazorpayInstance();
+      if (!razorpay) {
         return sendError(res, 500, "Payment Gateway Config Missing");
       }
 
-      const order = await rzp.orders.fetch(razorpay_order_id);
-      const receipt = String(order?.receipt || "");
+      const order = await razorpay.orders.fetch(razorpay_order_id);
+      const receipt = safeString(order?.receipt);
 
-      // receipt format: mem_<sqlId or mongoId>_<timestamp>
       if (receipt.startsWith("mem_")) {
         const parts = receipt.split("_");
         if (parts.length >= 3) {
@@ -209,24 +444,39 @@ exports.verifyAndActivateMembership = async (req, res) => {
     }
 
     if (!plan) {
-      return sendError(res, 404, "Plan not found");
+      return sendError(res, 404, "Selected membership plan not found");
     }
 
-    const start_date = new Date();
-    const end_date = new Date(start_date);
+    const planNumericId = generateStableNumericId(plan);
 
-    if (Number(plan.duration_type) === 2) {
-      end_date.setFullYear(end_date.getFullYear() + Number(plan.duration || 1));
-    } else {
-      end_date.setMonth(end_date.getMonth() + Number(plan.duration || 1));
+    // Optional production protection:
+    // prevent buying same active plan twice
+    const existingActive = await findActivePurchasedMembership(req.user.id);
+    if (
+      existingActive &&
+      existingActive.membership_card_id &&
+      generateStableNumericId(existingActive.membership_card_id) === planNumericId
+    ) {
+      return sendError(
+        res,
+        409,
+        "You already have an active membership for this plan"
+      );
     }
+
+    const startDate = new Date();
+    const endDate = calculateEndDate(
+      startDate,
+      plan.duration,
+      plan.duration_type
+    );
 
     const newCard = await PurchasedMemberCard.create({
       user_id: req.user.id,
       membership_card_id: plan._id,
       card_status: 1,
-      start_date,
-      end_date,
+      start_date: startDate,
+      end_date: endDate,
       max_visits: Number(plan.visits || 0),
       used_visits: 0,
       payment_type: 2,
@@ -238,107 +488,78 @@ exports.verifyAndActivateMembership = async (req, res) => {
       membership_card_amount: Number(plan.price || 0),
       paid_amount: Number(plan.price || 0),
       sql_id: Math.floor(100000 + Math.random() * 900000),
-      favorite_temples: [],
+      favorite_temples: Array.isArray(plan.temples)
+        ? plan.temples.map((item) => item?.templeId).filter(Boolean)
+        : [],
     });
 
     const updatedUser = await User.findByIdAndUpdate(
       req.user.id,
-      { is_member: true, membership: "active" },
+      {
+        is_member: true,
+        membership: "active",
+      },
       { new: true }
-    );
+    ).lean();
 
-    // Background PDF + mail
-    generateMembershipCertificate(newCard, updatedUser)
-      .then(async ({ filePath }) => {
-        const membershipId = `STM-${newCard._id.toString().slice(-6).toUpperCase()}`;
+    // Background PDF + email
+    Promise.resolve()
+      .then(async () => {
+        if (!updatedUser?.email) return;
+
+        const { filePath } = await generateMembershipCertificate(newCard, updatedUser);
+        const membershipId = `STM-${String(newCard._id).slice(-6).toUpperCase()}`;
+
         await mailSender(
           updatedUser.email,
           "Sovereign Membership Activated",
-          `Namaste ${updatedUser.name || "User"}, your membership is active until ${end_date.toDateString()}.`,
-          [{ filename: `Certificate_${membershipId}.pdf`, path: filePath }]
+          `Namaste ${
+            updatedUser.name || updatedUser.first_name || "User"
+          }, your membership is active until ${new Date(endDate).toDateString()}.`,
+          [
+            {
+              filename: `Certificate_${membershipId}.pdf`,
+              path: filePath,
+            },
+          ]
         );
       })
-      .catch((err) => console.error("Email/PDF Error:", err));
+      .catch((err) => {
+        console.error("Membership PDF/Email error:", err);
+      });
 
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "api.member_ship_verify_payment_success",
-      data: {
-        id: Number(newCard.sql_id || 0),
-        membership_card_id: Number(plan.sql_id || 0),
-        membership_card_name: String(plan.name || ""),
-        membership_card_amount: String(plan.price || 0),
-        paid_amount: String(plan.price || 0),
-        start_date: start_date.toISOString(),
-        end_date: end_date.toISOString(),
+    return sendSuccess(
+      res,
+      "api.member_ship_verify_payment_success",
+      {
+        id: generateStableNumericId(newCard),
+        membership_card_id: planNumericId,
+        membership_card_name: safeString(plan.name),
+        membership_card_amount: normalizePriceString(plan.price),
+        paid_amount: normalizePriceString(plan.price),
+        start_date: startDate.toISOString(),
+        end_date: endDate.toISOString(),
         payment: {
-          razorpay_order_id: String(razorpay_order_id || ""),
-          razorpay_payment_id: String(razorpay_payment_id || ""),
-          razorpay_public_key: String(process.env.RAZORPAY_KEY_ID || ""),
+          razorpay_order_id: safeString(razorpay_order_id),
+          razorpay_payment_id: safeString(razorpay_payment_id),
+          razorpay_public_key: safeString(process.env.RAZORPAY_KEY_ID),
           payment_status: 2,
           payment_type: 2,
           payment_date: new Date().toISOString(),
         },
-      },
-    });
+      }
+    );
   } catch (error) {
-    console.error("Membership verifyAndActivateMembership error:", error);
-    return sendError(res, 500, error.message);
+    console.error("verifyAndActivateMembership error:", error);
+    return sendError(res, 500, "Failed to verify membership payment");
   }
 };
 
 /**
- * 3. Fetch Active Plans for Buying
- * Triggered by MembershipCardResponse in Flutter
- *
- * Must match Flutter membership list model:
- * id, name, description, visits, price, duration, duration_type, status
- */
-exports.getActiveMemberships = async (req, res) => {
-  try {
-    const plans = await Membership.find({ status: 1 })
-      .sort({ price: 1, created_at: 1, _id: 1 })
-      .lean();
-
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "api.member_ship_card_success",
-      data: {
-        data: plans.map((plan) => ({
-          id: Number(plan.sql_id || 0),
-          name: String(plan.name || ""),
-          description: String(plan.description || ""),
-          visits: Number(plan.visits || 0),
-          price: String(plan.price || 0),
-          duration: Number(plan.duration || 1),
-          duration_type: Number(plan.duration_type || 1),
-          status: Number(plan.status || 1),
-        })),
-        total_count: plans.length,
-        is_next: false,
-        is_prev: false,
-        total_pages: 1,
-        current_page: 1,
-        per_page: plans.length,
-        from: plans.length ? 1 : 0,
-        to: plans.length,
-        next_page_url: null,
-        prev_page_url: null,
-        path: req.originalUrl,
-        has_pages: false,
-        links: [],
-      },
-    });
-  } catch (error) {
-    console.error("Membership getActiveMemberships error:", error);
-    return sendError(res, 500, error.message);
-  }
-};
-
-/**
- * 4. Fetch My Purchased Membership Card
+ * -----------------------------
+ * 4. Get my purchased membership card
+ * GET /membership-card/my-card
+ * -----------------------------
  */
 exports.getMyMembershipCard = async (req, res) => {
   try {
@@ -352,35 +573,22 @@ exports.getMyMembershipCard = async (req, res) => {
       .lean();
 
     if (!myCard) {
-      return res.status(200).json({
-        status: "true",
-        success: true,
-        message: "Membership details fetched successfully",
-        data: null,
-      });
+      return sendSuccess(
+        res,
+        "Membership details fetched successfully",
+        null
+      );
     }
 
-    const plan = myCard.membership_card_id;
+    const plan = myCard.membership_card_id || null;
 
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "Membership details fetched successfully",
-      data: {
-        id: Number(myCard.sql_id || 0),
-        membership_card_id: Number(plan?.sql_id || 0),
-        membership_card_name: String(plan?.name || ""),
-        membership_card_amount: String(myCard.membership_card_amount || 0),
-        paid_amount: String(myCard.paid_amount || 0),
-        start_date: myCard.start_date ? new Date(myCard.start_date).toISOString() : null,
-        end_date: myCard.end_date ? new Date(myCard.end_date).toISOString() : null,
-        payment_status: Number(myCard.payment_status || 0),
-        max_visits: Number(myCard.max_visits || 0),
-        used_visits: Number(myCard.used_visits || 0),
-      },
-    });
+    return sendSuccess(
+      res,
+      "Membership details fetched successfully",
+      normalizePurchasedCardForFlutter(myCard, plan)
+    );
   } catch (error) {
-    console.error("Membership getMyMembershipCard error:", error);
-    return sendError(res, 500, error.message);
+    console.error("getMyMembershipCard error:", error);
+    return sendError(res, 500, "Failed to fetch membership details");
   }
 };
