@@ -588,41 +588,65 @@ exports.verifyAndActivateMembership = async (req, res) => {
  */
 exports.getMyMembershipCard = async (req, res) => {
   try {
+    const userId = req.user?._id || req.user?.id;
 
-    const userId = req.user.sql_id;
-
-    const membership = await PurchasedMemberCard.findOne({
-      user_id: userId,
-      payment_status: 2
-    });
-
-    if (!membership) {
-      return res.json({
+    if (!userId) {
+      return res.status(401).json({
         status: "false",
-        message: "Membership not found"
+        success: false,
+        message: "User not authorized",
       });
     }
 
-    const templeUsage = await PurchasedMemberCardTemple.find({
-      purchased_member_card_id: membership.sql_id
-    });
+    const membership = await PurchasedMemberCard.findOne({
+      user_id: userId,
+      payment_status: 2,
+      card_status: 1,
+    })
+      .populate("membership_card_id")
+      .sort({ created_at: -1, _id: -1 })
+      .lean();
 
-    const favorites = await CardFavoriteTemple.find({
-      purchased_member_card_id: membership.sql_id
-    });
+    if (!membership) {
+      return res.status(200).json({
+        status: "true",
+        success: true,
+        message: "Membership details fetched successfully",
+        data: null,
+      });
+    }
 
-    return res.json({
+    const plan = membership.membership_card_id || null;
+
+    return res.status(200).json({
       status: "true",
-      membership,
-      temples: templeUsage,
-      favorites
+      success: true,
+      message: "Membership details fetched successfully",
+      data: {
+        id: Number(membership.sql_id || 0),
+        membership_card_id: Number(plan?.sql_id || 0),
+        membership_card_name: String(plan?.name || ""),
+        membership_card_amount: String(
+          membership.membership_card_amount || plan?.price || 0
+        ),
+        paid_amount: String(membership.paid_amount || plan?.price || 0),
+        start_date: membership.start_date
+          ? new Date(membership.start_date).toISOString()
+          : null,
+        end_date: membership.end_date
+          ? new Date(membership.end_date).toISOString()
+          : null,
+        payment_status: Number(membership.payment_status || 0),
+        max_visits: Number(membership.max_visits || 0),
+        used_visits: Number(membership.used_visits || 0),
+      },
     });
-
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
+    console.error("getMyMembershipCard error:", error);
+    return res.status(500).json({
       status: "false",
-      message: "Server error"
+      success: false,
+      message: "Server error",
     });
   }
 };
