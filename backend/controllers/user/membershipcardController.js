@@ -213,6 +213,7 @@ const findActivePurchasedMembership = async (userId) => {
  * GET /membership-card/index
  * --------------------------------
  */
+
 exports.getActiveMemberships = async (req, res) => {
   try {
     const plans = await Membership.find({ status: 1 })
@@ -232,6 +233,7 @@ exports.getActiveMemberships = async (req, res) => {
 
   } catch (error) {
     console.error("getActiveMemberships error:", error);
+
     return res.status(500).json({
       status: "false",
       success: false,
@@ -239,7 +241,9 @@ exports.getActiveMemberships = async (req, res) => {
       error: error.message
     });
   }
-};/**
+};
+
+/**
  * --------------------------------
  * 2. Create Razorpay Order
  * POST /membership-card/purchase
