@@ -46,7 +46,6 @@ const normalizeMembershipPlan = (plan = {}) => {
   };
 };
 
-
 exports.getActiveMemberships = async (req, res) => {
   try {
     const page = toInt(req.query.page) || 1;
@@ -58,19 +57,16 @@ exports.getActiveMemberships = async (req, res) => {
       Membership.countDocuments({ status: 1 }),
     ]);
 
-    // 🎯 Use our type-safe mapper
     const mapped = plans.map(normalizeMembershipPlan);
 
+    // 🎯 We must provide the FULL structure defined in your member_ship_card.dart
     return res.status(200).json({
       status: "true",
       success: true,
       message: "api.member_ship_card_success",
       data: {
-        // This MUST be the list for Flutter: List<MemberShip>? data;
-        data: mapped, 
-        
-        // 🎯 THESE ARE THE MISSING KEYS PREVENTING THE INDEX FROM LOADING:
-        total_count: totalCount,
+        data: mapped, // List of plans
+        total_count: totalCount, // REQUIRED for Flutter Data.fromJson
         is_next: totalCount > page * limit,
         is_prev: page > 1,
         total_pages: Math.ceil(totalCount / limit),
@@ -78,23 +74,19 @@ exports.getActiveMemberships = async (req, res) => {
         per_page: limit,
         from: skip + 1,
         to: skip + mapped.length,
-        next_page_url: totalCount > page * limit ? `${req.protocol}://${req.get('host')}/api/v1/membership-card/index?page=${page + 1}` : null,
-        prev_page_url: page > 1 ? `${req.protocol}://${req.get('host')}/api/v1/membership-card/index?page=${page - 1}` : null,
-        path: "/api/v1/membership-card/index",
+        // Bloc uses this to check if there is more to load
+        next_page_url: totalCount > page * limit ? `https://api.sarvatirthamayi.com/api/v1/membership-card/index?page=${page + 1}` : null,
+        prev_page_url: page > 1 ? `https://api.sarvatirthamayi.com/api/v1/membership-card/index?page=${page - 1}` : null,
+        path: "https://api.sarvatirthamayi.com/api/v1/membership-card/index",
         has_pages: totalCount > limit,
-        links: [
-           { url: null, label: "&laquo; Previous", active: false },
-           { url: "active", label: "1", active: true },
-           { url: null, label: "Next &raquo;", active: false }
-        ]
+        links: [] // Placeholder for your Link class
       },
     });
   } catch (error) {
-    console.error("🔥 Deep Track Error:", error);
-    return res.status(500).json({ status: "false", message: "Server Error", data: { data: [] } });
+    console.error("🔥 Index Load Error:", error);
+    return res.status(500).json({ status: "false", message: "Internal Server Error" });
   }
 };
-
 
 
 
