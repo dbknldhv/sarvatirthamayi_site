@@ -2,7 +2,11 @@ const mongoose = require("mongoose");
 
 const purchasedMemberCardTempleSchema = new mongoose.Schema(
   {
-    sql_id: { type: Number, default: null, index: true, sparse: true },
+    sql_id: {
+      type: Number,
+      default: null,
+      index: { unique: true, sparse: true },
+    },
 
     user_id: {
       type: mongoose.Schema.Types.ObjectId,
@@ -32,16 +36,25 @@ const purchasedMemberCardTempleSchema = new mongoose.Schema(
       index: true,
     },
 
-    max_visits: { type: Number, default: 1 },
-    used_visit: { type: Number, default: 0 },
+    max_visits: {
+      type: Number,
+      default: 1,
+    },
 
-    created_at: { type: Date, default: null },
-    updated_at: { type: Date, default: null },
+    used_visit: {
+      type: Number,
+      default: 0,
+    },
   },
   {
-    collection: "PurchasedMemberCardTemple",
-    timestamps: false,
+    timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
+    collection: "purchasedmembercardtemples",
   }
+);
+
+purchasedMemberCardTempleSchema.index(
+  { purchased_member_card_id: 1, temple_id: 1 },
+  { unique: true }
 );
 
 module.exports =

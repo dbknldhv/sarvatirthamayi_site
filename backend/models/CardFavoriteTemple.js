@@ -2,7 +2,11 @@ const mongoose = require("mongoose");
 
 const cardFavoriteTempleSchema = new mongoose.Schema(
   {
-    sql_id: { type: Number, default: null, index: true, sparse: true },
+    sql_id: {
+      type: Number,
+      default: null,
+      index: { unique: true, sparse: true },
+    },
 
     user_id: {
       type: mongoose.Schema.Types.ObjectId,
@@ -24,14 +28,16 @@ const cardFavoriteTempleSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-
-    created_at: { type: Date, default: null },
-    updated_at: { type: Date, default: null },
   },
   {
-    collection: "CardFavoriteTemple",
-    timestamps: false,
+    timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
+    collection: "cardfavoritetemples",
   }
+);
+
+cardFavoriteTempleSchema.index(
+  { purchased_member_card_id: 1, temple_id: 1 },
+  { unique: true }
 );
 
 module.exports =
