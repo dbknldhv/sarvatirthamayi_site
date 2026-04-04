@@ -36,92 +36,63 @@ const normalizeMembershipPlan = (plan = {}) => {
 };
 
 /* ---------------------------------------------------
-1️⃣ GET ALL MEMBERSHIPS (Sync with Flutter Strings)
+1️⃣ GET ALL MEMBERSHIPS (Fixing the Rupee 1 Issue)
 --------------------------------------------------- */
 exports.getActiveMemberships = async (req, res) => {
   try {
-    const page = toInt(req.query.page) || 1;
-    const limit = 15;
-    const skip = (page - 1) * limit;
+    const plans = await Membership.find({ status: 1 }).sort({ price: 1 }).lean();
 
-    const [plans, totalCount] = await Promise.all([
-      Membership.find({ status: 1 }).sort({ price: 1 }).skip(skip).limit(limit).lean(),
-      Membership.countDocuments({ status: 1 }),
-    ]);
-
-    const mapped = plans.map(normalizeMembershipPlan);
+    const mapped = plans.map(plan => ({
+      id: toInt(plan.sql_id) || Math.floor(Math.random() * 1000),
+      name: toString(plan.name),
+      description: toString(plan.description),
+      visits: toInt(plan.visits),
+      // 🎯 FIX: Ensure we use the actual price from the DB, not a hardcoded "1"
+      price: toString(plan.price || "0"), 
+      duration: toInt(plan.duration),
+      duration_type: toInt(plan.duration_type),
+      status: toInt(plan.status),
+    }));
 
     return res.status(200).json({
       status: "true",
       success: true,
-      // 🎯 CRITICAL: Matches Constants.memberShipCardSuccessMsg in your strings.dart
+      // 🎯 FIX: This must match Constants.memberShipCardSuccessMsg
       message: "Membership card list fetched successfully", 
-      data: {
-        data: mapped,
-        total_count: totalCount,
-        is_next: totalCount > page * limit,
-        is_prev: page > 1,
-        total_pages: Math.ceil(totalCount / limit),
-        current_page: page,
-        per_page: limit,
-        from: skip + 1,
-        to: skip + mapped.length,
-        // Bloc uses this to set _hasMore logic
-        next_page_url: totalCount > page * limit ? `https://api.sarvatirthamayi.com/api/v1/membership-card/index?page=${page + 1}` : null,
-        prev_page_url: page > 1 ? `https://api.sarvatirthamayi.com/api/v1/membership-card/index?page=${page - 1}` : null,
-        path: "https://api.sarvatirthamayi.com/api/v1/membership-card/index",
-        has_pages: totalCount > limit,
-        links: []
-      },
+      data: { data: mapped, total_count: mapped.length }
     });
   } catch (error) {
-    return res.status(500).json({ status: "false", message: "Internal Server Error" });
+    return res.status(500).json({ status: "false", message: "Error" });
   }
 };
 
 /* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Fixed for Unique Index Crash)
+2️⃣ PURCHASE MEMBERSHIP (Fixing the "No Response" Issue)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    const rawId = req.body.membership_card_id || req.body.memberShipId;
-    const userId = req.user._id || req.user.id;
+    const planId = req.body.membership_card_id || req.body.memberShipId;
+    const userId = req.user._id;
 
-    if (!rawId) return res.status(400).json({ status: "false", message: "ID missing" });
+    const membership = await Membership.findOne({
+      $or: [{ sql_id: toInt(planId) }, { _id: mongoose.Types.ObjectId.isValid(planId) ? planId : null }]
+    });
 
-    // 🎯 ID Safety Lookup
-    let query = { status: 1 };
-    if (mongoose.Types.ObjectId.isValid(rawId)) {
-      query._id = rawId;
-    } else {
-      const numericId = toInt(rawId);
-      query.$or = [{ sql_id: numericId }, { id: numericId }];
-    }
-
-    const membership = await Membership.findOne(query);
     if (!membership) return res.status(404).json({ status: "false", message: "Plan not found" });
 
+    // Calculate actual amount in Paise for Razorpay
     const amountInPaise = Math.round(Number(membership.price) * 100);
-    
-    // Create Razorpay Order
+
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    /**
-     * 🎯 THE FIX FOR E11000 ERROR:
-     * We add a unique 'sql_id' based on the timestamp to satisfy 
-     * the unique index requirement in your MongoDB collection.
-     */
-    const purchased = await PurchasedMemberCard.create({
+    await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
-      sql_id: Date.now(), // 👈 Fixes the 'dup key: { sql_id: null }' error
-      card_status: 0,
       payment_status: 1,
-      max_visits: membership.visits,
       razorpay_order_id: razorpayOrder.id,
       paid_amount: membership.price
     });
@@ -129,22 +100,26 @@ exports.purchaseMembershipCard = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
+      /**
+       * 🎯 CRITICAL FIX: Your Flutter listener checks for:
+       * Constants.memberShipVerifyPaymentSuccessMsg
+       * In your strings.dart, that value is: "Membership card purchased successfully"
+       */
       message: "Membership card purchased successfully", 
       data: {
         payment: {
           razorpayOrderId: razorpayOrder.id,
           razorpayPublicKey: process.env.RAZORPAY_KEY_ID,
           amount: amountInPaise,
-        },
-        purchased_member_card_id: purchased._id
+        }
       }
     });
-
   } catch (error) {
-    console.error("🔥 Duplicate Key Crash Fixed:", error.message);
-    return res.status(500).json({ status: "false", message: error.message });
+    console.error("🔥 Purchase Error:", error.message);
+    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
+
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Production Ready & Sync with Flutter)
 --------------------------------------------------- */
