@@ -447,17 +447,17 @@ exports.verifyMembershipPayment = async (req, res) => {
 
 exports.getMyMembershipCard = async (req, res) => {
   try {
+
     const userId = req.user.id;
 
     const card = await PurchasedMemberCard.findOne({
-      user_id: userId,
-      payment_status: 2,
-      card_status: 1
+      user_id: new mongoose.Types.ObjectId(userId),
+      payment_status: 2
     })
     .sort({ createdAt: -1 })
     .populate("membership_card_id");
 
-    // If user has no membership → return Guest
+    // If no membership purchased
     if (!card) {
       return res.status(200).json({
         status: "true",
@@ -480,13 +480,14 @@ exports.getMyMembershipCard = async (req, res) => {
       message: "Membership card fetched successfully",
       data: {
         id: plan.sql_id || 1,
-        membership_card_name: plan.name || "",
+        membership_card_name: plan.name || "Guest",
         membership_card_id: plan.sql_id || 1,
         membership_card_price: String(plan.price || "0")
       }
     });
 
   } catch (error) {
+
     console.error("getMyMembershipCard error:", error);
 
     return res.status(500).json({
@@ -494,5 +495,6 @@ exports.getMyMembershipCard = async (req, res) => {
       success: false,
       message: "Failed to fetch membership card"
     });
+
   }
 };
