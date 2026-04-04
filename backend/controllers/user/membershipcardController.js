@@ -46,14 +46,11 @@ const normalizeMembershipPlan = (plan = {}) => {
   };
 };
 
-/* ---------------------------------------------------
-1️⃣ GET ALL MEMBERSHIPS (List & Pagination)
-GET /api/v1/membership-card/index
---------------------------------------------------- */
+
 exports.getActiveMemberships = async (req, res) => {
   try {
     const page = toInt(req.query.page) || 1;
-    const limit = toInt(req.query.limit) || 15;
+    const limit = 15;
     const skip = (page - 1) * limit;
 
     const [plans, totalCount] = await Promise.all([
@@ -66,34 +63,25 @@ exports.getActiveMemberships = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "api.member_ship_card_success", // 🎯 Sync with Flutter Constants
+      message: "api.member_ship_card_success",
       data: {
-        data: mapped,
-        total_count: totalCount,
-        is_next: totalCount > page * limit,
-        is_prev: page > 1,
+        data: mapped, // This is what the UI loops through
+        total_count: totalCount, // Expected by Flutter Model
+        is_next: totalCount > page * limit, // Expected by Flutter Model
+        is_prev: page > 1, // Expected by Flutter Model
         total_pages: Math.ceil(totalCount / limit),
         current_page: page,
         per_page: limit,
-        from: skip + 1,
-        to: skip + mapped.length,
-        next_page_url: totalCount > page * limit ? `${req.protocol}://${req.get('host')}${req.baseUrl}${req.path}?page=${page + 1}` : null,
-        prev_page_url: page > 1 ? `${req.protocol}://${req.get('host')}${req.baseUrl}${req.path}?page=${page - 1}` : null,
-        path: req.originalUrl,
-        has_pages: totalCount > limit,
-        links: [] 
+        next_page_url: totalCount > page * limit ? `membership-card/index?page=${page + 1}` : null,
+        prev_page_url: page > 1 ? `membership-card/index?page=${page - 1}` : null,
       },
     });
   } catch (error) {
-    console.error("🔥 Membership List Error:", error.message);
-    return res.status(500).json({ 
-      status: "false", 
-      success: false, 
-      message: "Internal Server Error", 
-      data: { data: [] } 
-    });
+    return res.status(500).json({ status: "false", message: "Server Error" });
   }
 };
+
+
 
 /* ---------------------------------------------------
 2️⃣ PURCHASE MEMBERSHIP (Initialization)
