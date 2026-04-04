@@ -1,21 +1,39 @@
 const mongoose = require("mongoose");
 
-const cardFavoriteTempleSchema = new mongoose.Schema({
+const cardFavoriteTempleSchema = new mongoose.Schema(
+  {
+    sql_id: { type: Number, default: null, index: true, sparse: true },
 
-  sql_id: Number,
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
 
-  user_id: Number,
+    temple_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Temple",
+      required: true,
+      index: true,
+    },
 
-  temple_id: Number,
+    purchased_member_card_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PurchasedMemberCard",
+      required: true,
+      index: true,
+    },
 
-  purchased_member_card_id: Number,
+    created_at: { type: Date, default: null },
+    updated_at: { type: Date, default: null },
+  },
+  {
+    collection: "CardFavoriteTemple",
+    timestamps: false,
+  }
+);
 
-  created_at: Date,
-
-  updated_at: Date
-
-}, {
-  collection: "CardFavoriteTemple"
-});
-
-module.exports = mongoose.model("CardFavoriteTemple", cardFavoriteTempleSchema);
+module.exports =
+  mongoose.models.CardFavoriteTemple ||
+  mongoose.model("CardFavoriteTemple", cardFavoriteTempleSchema);
