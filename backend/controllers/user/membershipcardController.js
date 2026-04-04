@@ -218,12 +218,32 @@ exports.getActiveMemberships = async (req, res) => {
       .sort({ price: 1, createdAt: 1, created_at: 1, _id: 1 })
       .lean();
 
-    const mappedPlans = plans.map(normalizeMembershipPlanForFlutter);
+    const mappedPlans = plans.map((plan) => {
+      let generatedId = 0;
 
-    return sendSuccess(
-      res,
-      "api.member_ship_card_success",
-      {
+      if (plan.sql_id !== undefined && plan.sql_id !== null && plan.sql_id !== "") {
+        generatedId = Number(plan.sql_id);
+      } else if (plan._id) {
+        generatedId = parseInt(plan._id.toString().slice(-6), 16);
+      }
+
+      return {
+        id: generatedId,
+        name: String(plan.name || ""),
+        description: String(plan.description || ""),
+        visits: Number(plan.visits || 0),
+        price: String(plan.price || 0),
+        duration: Number(plan.duration || 1),
+        duration_type: Number(plan.duration_type || 1),
+        status: Number(plan.status || 1),
+      };
+    });
+
+    return res.status(200).json({
+      status: "true",
+      success: true,
+      message: "api.member_ship_card_success",
+      data: {
         data: mappedPlans,
         total_count: mappedPlans.length,
         is_next: false,
@@ -238,11 +258,15 @@ exports.getActiveMemberships = async (req, res) => {
         path: req.originalUrl,
         has_pages: false,
         links: [],
-      }
-    );
+      },
+    });
   } catch (error) {
     console.error("getActiveMemberships error:", error);
-    return sendError(res, 500, "Failed to fetch membership plans");
+    return res.status(500).json({
+      status: "false",
+      success: false,
+      message: "Failed to fetch membership plans",
+    });
   }
 };
 
