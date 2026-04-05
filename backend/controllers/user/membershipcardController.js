@@ -68,45 +68,51 @@ exports.getActiveMemberships = async (req, res) => {
 };
 
 /* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Backend-Only Fix for Existing APK)
+2️⃣ PURCHASE MEMBERSHIP (Bulletproof & APK-Synced)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // 1. Capture ID (The APK sends "membership_card_id": 1)
-    const rawId = req.body.membership_card_id || req.body.memberShipId;
+    // 🎯 FIX 1: Capture ID from every possible key name
+    const rawId = req.body.membership_card_id || req.body.memberShipId || req.body.id;
     const userId = req.user._id || req.user.id;
 
-    if (!rawId) return res.status(400).json({ status: "false", message: "ID missing" });
+    if (!rawId) {
+      return res.status(400).json({ status: "false", message: "ID missing" });
+    }
 
-    // 2. Fetch the REAL plan from MongoDB using the ID provided
+    /**
+     * 🎯 FIX 2: PREVENT REFERENCE ERROR
+     * We define 'membership' as 'null' first to ensure it's in scope for the whole try block.
+     */
+    let membership = null;
     let query = { status: 1 };
+
     if (mongoose.Types.ObjectId.isValid(rawId)) {
       query._id = rawId;
     } else {
-      // APK sends integer 1, so we look for sql_id: 1 in the database
-      query.sql_id = parseInt(rawId);
+      const numId = parseInt(rawId);
+      query.$or = [{ sql_id: numId }, { id: numId }];
     }
 
-    const membership = await Membership.findOne(query);
+    // Assign value to the scoped variable
+    membership = await Membership.findOne(query);
 
     if (!membership) {
-      console.error(`❌ Plan not found for ID: ${rawId}`);
-      return res.status(404).json({ status: "false", message: "Membership plan not found" });
+      console.error(`❌ Plan not found in DB for ID: ${rawId}`);
+      return res.status(404).json({ status: "false", message: "Plan not found" });
     }
 
-    // 🎯 THE REAL PRICE FIX: 
-    // We use the 'membership.price' from the database instead of a default.
-    // Razorpay requires Paise (Price * 100)
+    // 🎯 FIX 3: THE REAL PRICE (No more ₹1)
+    // Pull price from the 'membership' variable we just found
     const amountInPaise = Math.round(Number(membership.price) * 100);
 
-    // 3. Create Razorpay Order
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    // 4. Create record (Date.now() for sql_id prevents the E11000 duplicate error)
+    // 🎯 FIX 4: PREVENT COLLISION
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
@@ -118,22 +124,21 @@ exports.purchaseMembershipCard = async (req, res) => {
       paid_amount: membership.price
     });
 
-    // 5. THE RESPONSE: Mapped exactly to your APK's member_ship_purchase_card_model.dart
+    // 🎯 FIX 5: APK DATA MAPPING
     return res.status(200).json({
       status: "true",
       success: true,
-      // 🎯 TRIGGER: This exact message string allows the Bloc to navigate/open Razorpay
+      // String must match Constants.memberShipPurchaseSuccessMsg
       message: "Membership card purchased successfully", 
       data: {
         id: toInt(purchased.sql_id),
-        user_id: 1, // Placeholder int for Model requirement
+        user_id: 1, // Placeholder int for model
         membership_card_id: toInt(membership.sql_id) || 1,
-        paid_amount: String(membership.price), // Displays real price in Flutter UI
+        paid_amount: String(membership.price),
         payment: {
-          // 🎯 MUST be Snake Case to match 'Payment.fromJson' in the APK
           razorpay_order_id: razorpayOrder.id,
           razorpay_public_key: process.env.RAZORPAY_KEY_ID,
-          amount: amountInPaise, 
+          amount: amountInPaise,
           payment_status: 1,
           payment_type: 2
         }
@@ -141,7 +146,7 @@ exports.purchaseMembershipCard = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("🔥 APK Compatibility Fix Error:", error.message);
+    console.error("🔥 Final Properly Fixed Error:", error.message);
     return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
