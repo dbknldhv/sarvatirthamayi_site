@@ -67,63 +67,69 @@ exports.getActiveMemberships = async (req, res) => {
   }
 };
 
+
 /* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Initialization)
+2️⃣ PURCHASE MEMBERSHIP (Fixed Scoping & Reference)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // Supports keys from both rest_api.dart and manual testing
+    // 1. Capture ID from either possible key name (Snake case or Camel case)
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    if (!rawId) return res.status(400).json({ status: "false", message: "ID missing" });
+    if (!rawId) {
+      return res.status(400).json({ status: "false", message: "Membership ID is missing" });
+    }
 
-    // Plan Lookup (supports MongoDB _id and integer sql_id)
+    // 2. Define the lookup query
     let query = { status: 1 };
     if (mongoose.Types.ObjectId.isValid(rawId)) {
       query._id = rawId;
     } else {
-      const numId = toInt(rawId);
-      query.$or = [{ sql_id: numId }, { id: numId }];
+      const numericId = parseInt(rawId);
+      query.$or = [{ sql_id: numericId }, { id: numericId }];
     }
 
+    // 🎯 FIX: Declare 'membership' properly before using it
     const membership = await Membership.findOne(query);
-    if (!membership) return res.status(404).json({ status: "false", message: "Plan not found" });
 
+    if (!membership) {
+      console.error(`❌ Plan not found for ID: ${rawId}`);
+      return res.status(404).json({ status: "false", message: "Plan not found" });
+    }
+
+    // 3. Razorpay Integration
     const amountInPaise = Math.round(Number(membership.price) * 100);
-    if (amountInPaise <= 0) return res.status(400).json({ status: "false", message: "Invalid price" });
-
-    // 1. Create Razorpay Order
+    
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    // 2. Save Pending Record (sql_id: Date.now() bypasses unique index collision)
+    // 4. Create the purchase record
+    // We use Date.now() for sql_id to satisfy the unique index requirement
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
       sql_id: Date.now(), 
-      card_status: 0, 
-      payment_status: 1, 
+      card_status: 0,
+      payment_status: 1,
       max_visits: membership.visits,
       razorpay_order_id: razorpayOrder.id,
       paid_amount: membership.price
     });
 
-    // 3. Exact Response Mapping for member_ship_purchase_card_model.dart
+    // 5. Response Sync with Flutter Model
     return res.status(200).json({
       status: "true",
       success: true,
-      // 🎯 MUST match Constants.memberShipPurchaseSuccessMsg to trigger Bloc Navigation
+      // Matches Constants.memberShipPurchaseSuccessMsg in strings.dart
       message: "Membership card purchased successfully", 
       data: {
-        id: toInt(purchased.sql_id),
-        user_id: 1, // Mocked as int for Model compatibility
-        membership_card_id: toInt(membership.sql_id) || 1,
-        paid_amount: toString(membership.price),
-        created_at: purchased.created_at || new Date().toISOString(),
+        id: purchased.sql_id || 1,
+        membership_card_id: parseInt(membership.sql_id) || 1,
+        paid_amount: String(membership.price),
         payment: {
           razorpay_order_id: razorpayOrder.id,
           razorpay_public_key: process.env.RAZORPAY_KEY_ID,
@@ -133,9 +139,15 @@ exports.purchaseMembershipCard = async (req, res) => {
         }
       }
     });
+
   } catch (error) {
-    console.error("🔥 Purchase Controller Error:", error.message);
-    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
+    // This logs the specific line of failure to stm-api-out.log
+    console.error("🔥 Final Fix Error Log:", error.message); 
+    return res.status(500).json({ 
+      status: "false", 
+      message: "Purchase initialization failed",
+      error: error.message 
+    });
   }
 };
 
