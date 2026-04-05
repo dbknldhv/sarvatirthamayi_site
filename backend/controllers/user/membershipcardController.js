@@ -67,52 +67,40 @@ exports.getActiveMemberships = async (req, res) => {
   }
 };
 
+
+
 /* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Bulletproof & APK-Synced)
+2️⃣ PURCHASE MEMBERSHIP (Zero-Dart-Change Version)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // 🎯 FIX 1: Capture ID from every possible key name
-    const rawId = req.body.membership_card_id || req.body.memberShipId || req.body.id;
+    // 1. Capture the ID exactly as your current APK sends it
+    const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    if (!rawId) {
-      return res.status(400).json({ status: "false", message: "ID missing" });
-    }
-
-    /**
-     * 🎯 FIX 2: PREVENT REFERENCE ERROR
-     * We define 'membership' as 'null' first to ensure it's in scope for the whole try block.
-     */
-    let membership = null;
+    // 2. Locate the plan using standard logic
     let query = { status: 1 };
-
     if (mongoose.Types.ObjectId.isValid(rawId)) {
       query._id = rawId;
     } else {
-      const numId = parseInt(rawId);
-      query.$or = [{ sql_id: numId }, { id: numId }];
+      query.sql_id = parseInt(rawId);
     }
 
-    // Assign value to the scoped variable
-    membership = await Membership.findOne(query);
+    const membership = await Membership.findOne(query);
 
     if (!membership) {
-      console.error(`❌ Plan not found in DB for ID: ${rawId}`);
       return res.status(404).json({ status: "false", message: "Plan not found" });
     }
 
-    // 🎯 FIX 3: THE REAL PRICE (No more ₹1)
-    // Pull price from the 'membership' variable we just found
+    // 3. Create Razorpay Order with REAL price from DB
     const amountInPaise = Math.round(Number(membership.price) * 100);
-
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    // 🎯 FIX 4: PREVENT COLLISION
+    // 4. Save Record - Use Date.now() to bypass the 'sql_id' unique index crash
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
@@ -124,18 +112,19 @@ exports.purchaseMembershipCard = async (req, res) => {
       paid_amount: membership.price
     });
 
-    // 🎯 FIX 5: APK DATA MAPPING
+    // 5. THE CRITICAL PART: The response must match your APK's logic exactly
     return res.status(200).json({
       status: "true",
       success: true,
-      // String must match Constants.memberShipPurchaseSuccessMsg
+      // 🎯 MUST MATCH: This string is what triggers the popup in your APK
       message: "Membership card purchased successfully", 
       data: {
-        id: toInt(purchased.sql_id),
-        user_id: 1, // Placeholder int for model
-        membership_card_id: toInt(membership.sql_id) || 1,
+        id: purchased.sql_id,
+        user_id: 1, 
+        membership_card_id: parseInt(membership.sql_id) || 1,
         paid_amount: String(membership.price),
         payment: {
+          // 🎯 MUST BE SNAKE_CASE: Your APK's Payment model looks for these keys
           razorpay_order_id: razorpayOrder.id,
           razorpay_public_key: process.env.RAZORPAY_KEY_ID,
           amount: amountInPaise,
@@ -146,10 +135,12 @@ exports.purchaseMembershipCard = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("🔥 Final Properly Fixed Error:", error.message);
+    console.error("🔥 APK Bypass Fix Error:", error.message);
+    // If it fails, send a clean 500 so the app shows a toast instead of crashing
     return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
+
 
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Activation)
