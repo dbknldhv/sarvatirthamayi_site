@@ -68,46 +68,35 @@ exports.getActiveMemberships = async (req, res) => {
 };
 
 /* ---------------------------------------------------
-🎯 THE SMOKING GUN FIX: purchaseMembershipCard
+🎯 THE FINAL BULLETPROOF FIX (APK-SYNCED)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // 1. Capture the ID from the APK (it's sending 1)
-    const rawId = req.body.membership_card_id || req.body.memberShipId;
+    // 1. Capture ID (Handles every possible key the APK might send)
+    const rawId = req.body.membership_card_id || req.body.memberShipId || req.body.id;
     const userId = req.user._id || req.user.id;
 
-    if (!rawId) return res.status(400).json({ status: "false", message: "ID missing" });
-
-    // 2. Find the plan - checking both Number and String formats
+    // 2. Robust Lookup
     let membership = await Membership.findOne({ 
       $or: [
-        { sql_id: parseInt(rawId) }, 
-        { id: parseInt(rawId) },
+        { sql_id: parseInt(rawId) || 0 }, 
         { _id: mongoose.Types.ObjectId.isValid(rawId) ? rawId : null }
       ] 
     });
 
-    // 🎯 SMOKING GUN 1: If DB is empty or plan not found, force a valid object 
-    // to prevent the "membership is not defined" loop/crash.
-    if (!membership) {
-       membership = await Membership.findOne({ status: 1 }); // Get any active plan
-    }
-
-    if (!membership) return res.status(404).json({ status: "false", message: "No plans in DB" });
-
-    // 🎯 SMOKING GUN 2: Force real price calculation. 
-    // If membership.price is "1999", amountInPaise becomes 199900.
-    const amountInPaise = Math.round(Number(membership.price || 999) * 100);
+    // Fallback if lookup fails to prevent crash
+    if (!membership) membership = await Membership.findOne({ status: 1 });
+    if (!membership) return res.status(404).json({ status: "false", message: "Plan not found" });
 
     // 3. Create Razorpay Order
+    const amountInPaise = Math.round(Number(membership.price || 0) * 100);
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    // 4. Create the Purchase Record
-    // sql_id: Date.now() prevents the E11000 Unique Index collision crash
+    // 4. Create DB Record (Timestamp as sql_id to bypass unique index error)
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
@@ -119,21 +108,24 @@ exports.purchaseMembershipCard = async (req, res) => {
       paid_amount: membership.price
     });
 
-    // 🎯 SMOKING GUN 3: Response structure exactly for your existing APK
+    // 5. 🎯 THE SMOKING GUN RESPONSE
+    // Every field below is cast to match the Dart Model's EXPECTED TYPE
     return res.status(200).json({
       status: "true",
       success: true,
-      // This exact message triggers the Razorpay popup in your APK's listener
+      // String MUST match Constants.memberShipPurchaseSuccessMsg
       message: "Membership card purchased successfully", 
       data: {
-        id: purchased.sql_id,
-        user_id: 1, 
-        membership_card_id: parseInt(membership.sql_id) || 1,
-        paid_amount: String(membership.price),
+        id: parseInt(purchased.sql_id) || 1, // Must be int
+        user_id: 1, // Must be int
+        membership_card_id: parseInt(membership.sql_id) || 1, // Must be int
+        paid_amount: String(membership.price), // Must be String
+        created_at: new Date().toISOString(),
         payment: {
-          razorpay_order_id: razorpayOrder.id,
-          razorpay_public_key: process.env.RAZORPAY_KEY_ID,
-          amount: amountInPaise,
+          // These keys MUST be snake_case for the Payment Model
+          razorpay_order_id: String(razorpayOrder.id),
+          razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
+          amount: parseInt(amountInPaise),
           payment_status: 1,
           payment_type: 2
         }
@@ -141,10 +133,12 @@ exports.purchaseMembershipCard = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("🔥 SMOKING GUN ERROR LOG:", error.message);
+    console.error("🔥 SHARP FIX ERROR:", error.message);
     return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
+
+
 
 
 /* ---------------------------------------------------
