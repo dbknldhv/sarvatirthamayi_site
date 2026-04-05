@@ -66,31 +66,61 @@ exports.getActiveMemberships = async (req, res) => {
   }
 };
 
+
 /* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Fixed for Database Collision)
+2️⃣ PURCHASE MEMBERSHIP (Fully Fixed & Scoped)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
+    // 🎯 FIX 1: Capture ID from either possible key name
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    // ... (Keep your Plan Lookup logic here) ...
+    if (!rawId) {
+      return res.status(400).json({ status: "false", message: "Membership ID is missing" });
+    }
+
+    /**
+     * 🎯 FIX 2: PLAN LOOKUP LOGIC
+     * We check both the integer sql_id (1) and the MongoDB _id.
+     */
+    let query = { status: 1 };
+    if (mongoose.Types.ObjectId.isValid(rawId)) {
+      query._id = rawId;
+    } else {
+      const numericId = toInt(rawId);
+      query.$or = [{ sql_id: numericId }, { id: numericId }];
+    }
+
+    const membership = await Membership.findOne(query);
+
+    if (!membership) {
+      console.error(`❌ Plan not found for ID: ${rawId}`);
+      return res.status(404).json({ status: "false", message: "Plan not found" });
+    }
+
+    // 🎯 FIX 3: RAZORPAY INITIALIZATION
+    const amountInPaise = Math.round(Number(membership.price) * 100);
+    
+    if (amountInPaise <= 0) {
+      return res.status(400).json({ status: "false", message: "Invalid plan price" });
+    }
 
     const razorpayOrder = await razorpay.orders.create({
-      amount: Math.round(Number(membership.price) * 100),
+      amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
     /**
-     * 🎯 THE CRITICAL FIX:
-     * We pass a unique timestamp to sql_id to prevent the 
-     * E11000 duplicate key error in MongoDB.
+     * 🎯 FIX 4: PREVENT E11000 COLLISION
+     * Even though you dropped the index, we use a unique timestamp for sql_id
+     * to keep the database happy and organized.
      */
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
-      sql_id: Date.now(), // 👈 This ensures no two records have the same ID
+      sql_id: Date.now(), 
       card_status: 0,
       payment_status: 1,
       max_visits: membership.visits,
@@ -101,20 +131,25 @@ exports.purchaseMembershipCard = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
+      // 🎯 MESSAGE SYNC: Matches Constants.memberShipVerifyPaymentSuccessMsg
       message: "Membership card purchased successfully", 
       data: {
         payment: {
           razorpayOrderId: razorpayOrder.id,
           razorpayPublicKey: process.env.RAZORPAY_KEY_ID,
-          amount: Math.round(Number(membership.price) * 100),
+          amount: amountInPaise,
         },
         purchased_member_card_id: purchased._id
       }
     });
 
   } catch (error) {
-    console.error("🔥 DB Collision Fixed:", error.message);
-    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
+    console.error("🔥 Final Purchase Fix Error:", error.message);
+    return res.status(500).json({ 
+      status: "false", 
+      message: "Purchase initialization failed",
+      error: error.message 
+    });
   }
 };
 
