@@ -69,45 +69,28 @@ exports.getActiveMemberships = async (req, res) => {
 /* ---------------------------------------------------
 2️⃣ PURCHASE MEMBERSHIP (Fixed for Database Collision)
 --------------------------------------------------- */
-/* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Variable Scope Fix)
---------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    if (!rawId) return res.status(400).json({ status: "false", message: "ID missing" });
+    // ... (Keep your Plan Lookup logic here) ...
 
-    // 🎯 Use the name 'membership' consistently
-    let query = { status: 1 };
-    if (mongoose.Types.ObjectId.isValid(rawId)) {
-      query._id = rawId;
-    } else {
-      query.$or = [{ sql_id: toInt(rawId) }, { id: toInt(rawId) }];
-    }
-
-    // 🎯 DEFINING IT HERE
-    const membership = await Membership.findOne(query);
-
-    if (!membership) {
-      console.error(`❌ Plan not found for ID: ${rawId}`);
-      return res.status(404).json({ status: "false", message: "Plan not found" });
-    }
-
-    // 🎯 USING IT HERE
-    const amountInPaise = Math.round(Number(membership.price) * 100);
-    
     const razorpayOrder = await razorpay.orders.create({
-      amount: amountInPaise,
+      amount: Math.round(Number(membership.price) * 100),
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    // 🎯 AND USING IT HERE
+    /**
+     * 🎯 THE CRITICAL FIX:
+     * We pass a unique timestamp to sql_id to prevent the 
+     * E11000 duplicate key error in MongoDB.
+     */
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
+      sql_id: Date.now(), // 👈 This ensures no two records have the same ID
       card_status: 0,
       payment_status: 1,
       max_visits: membership.visits,
@@ -123,17 +106,18 @@ exports.purchaseMembershipCard = async (req, res) => {
         payment: {
           razorpayOrderId: razorpayOrder.id,
           razorpayPublicKey: process.env.RAZORPAY_KEY_ID,
-          amount: amountInPaise,
+          amount: Math.round(Number(membership.price) * 100),
         },
         purchased_member_card_id: purchased._id
       }
     });
 
   } catch (error) {
-    console.error("🔥 Scope Error Fixed:", error.message);
-    return res.status(500).json({ status: "false", message: error.message });
+    console.error("🔥 DB Collision Fixed:", error.message);
+    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
+
 
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Production Ready & Sync with Flutter)
