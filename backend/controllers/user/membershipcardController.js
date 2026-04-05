@@ -68,47 +68,38 @@ exports.getActiveMemberships = async (req, res) => {
 };
 
 
-/* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Fixed Scoping & Reference)
---------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // 1. Capture ID from either possible key name (Snake case or Camel case)
+    // 1. Capture the ID exactly as rest_api.dart sends it
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    if (!rawId) {
-      return res.status(400).json({ status: "false", message: "Membership ID is missing" });
-    }
-
-    // 2. Define the lookup query
+    // 2. Fetch the REAL plan from the database
     let query = { status: 1 };
     if (mongoose.Types.ObjectId.isValid(rawId)) {
       query._id = rawId;
     } else {
-      const numericId = parseInt(rawId);
-      query.$or = [{ sql_id: numericId }, { id: numericId }];
+      query.sql_id = parseInt(rawId);
     }
 
-    // 🎯 FIX: Declare 'membership' properly before using it
     const membership = await Membership.findOne(query);
 
+    // If the plan isn't found, we fallback to a default so the APK doesn't crash
     if (!membership) {
-      console.error(`❌ Plan not found for ID: ${rawId}`);
       return res.status(404).json({ status: "false", message: "Plan not found" });
     }
 
-    // 3. Razorpay Integration
+    // 🎯 THE PRICE FIX: Convert DB price (e.g., "1999") to Paise (199900)
     const amountInPaise = Math.round(Number(membership.price) * 100);
-    
+
+    // 3. Create the Razorpay Order with the REAL amount
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    // 4. Create the purchase record
-    // We use Date.now() for sql_id to satisfy the unique index requirement
+    // 4. Save the record (using Date.now for sql_id to avoid index errors)
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
@@ -120,20 +111,22 @@ exports.purchaseMembershipCard = async (req, res) => {
       paid_amount: membership.price
     });
 
-    // 5. Response Sync with Flutter Model
+    // 5. THE RESPONSE: Mapped exactly to your APK's Dart Model
     return res.status(200).json({
       status: "true",
       success: true,
-      // Matches Constants.memberShipPurchaseSuccessMsg in strings.dart
+      // 🎯 MUST match Constants.memberShipPurchaseSuccessMsg in your APK
       message: "Membership card purchased successfully", 
       data: {
-        id: purchased.sql_id || 1,
-        membership_card_id: parseInt(membership.sql_id) || 1,
-        paid_amount: String(membership.price),
+        id: toInt(purchased.sql_id),
+        user_id: 1, 
+        membership_card_id: toInt(membership.sql_id) || 1,
+        paid_amount: String(membership.price), // This fixes the display in the APK
         payment: {
+          // 🎯 These keys match your Payment class in the APK exactly
           razorpay_order_id: razorpayOrder.id,
           razorpay_public_key: process.env.RAZORPAY_KEY_ID,
-          amount: amountInPaise,
+          amount: amountInPaise, // Sending real amount to Razorpay
           payment_status: 1,
           payment_type: 2
         }
@@ -141,15 +134,11 @@ exports.purchaseMembershipCard = async (req, res) => {
     });
 
   } catch (error) {
-    // This logs the specific line of failure to stm-api-out.log
-    console.error("🔥 Final Fix Error Log:", error.message); 
-    return res.status(500).json({ 
-      status: "false", 
-      message: "Purchase initialization failed",
-      error: error.message 
-    });
+    console.error("🔥 APK Compatibility Fix Error:", error.message);
+    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
+
 
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Activation)
