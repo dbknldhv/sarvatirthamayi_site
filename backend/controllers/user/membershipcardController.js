@@ -68,55 +68,37 @@ exports.getActiveMemberships = async (req, res) => {
 
 
 /* ---------------------------------------------------
-2️⃣ PURCHASE MEMBERSHIP (Fully Fixed & Scoped)
+2️⃣ PURCHASE MEMBERSHIP (Final Sync with rest_api.dart)
 --------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // 🎯 FIX 1: Capture ID from either possible key name
+    // 🎯 Sync with rest_api.dart request key: "membership_card_id"
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    if (!rawId) {
-      return res.status(400).json({ status: "false", message: "Membership ID is missing" });
-    }
+    if (!rawId) return res.status(400).json({ status: "false", message: "ID missing" });
 
-    /**
-     * 🎯 FIX 2: PLAN LOOKUP LOGIC
-     * We check both the integer sql_id (1) and the MongoDB _id.
-     */
+    // Plan Lookup
     let query = { status: 1 };
     if (mongoose.Types.ObjectId.isValid(rawId)) {
       query._id = rawId;
     } else {
-      const numericId = toInt(rawId);
-      query.$or = [{ sql_id: numericId }, { id: numericId }];
+      query.$or = [{ sql_id: parseInt(rawId) }, { id: parseInt(rawId) }];
     }
 
     const membership = await Membership.findOne(query);
+    if (!membership) return res.status(404).json({ status: "false", message: "Plan not found" });
 
-    if (!membership) {
-      console.error(`❌ Plan not found for ID: ${rawId}`);
-      return res.status(404).json({ status: "false", message: "Plan not found" });
-    }
-
-    // 🎯 FIX 3: RAZORPAY INITIALIZATION
     const amountInPaise = Math.round(Number(membership.price) * 100);
     
-    if (amountInPaise <= 0) {
-      return res.status(400).json({ status: "false", message: "Invalid plan price" });
-    }
-
+    // Create Razorpay Order
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    /**
-     * 🎯 FIX 4: PREVENT E11000 COLLISION
-     * Even though you dropped the index, we use a unique timestamp for sql_id
-     * to keep the database happy and organized.
-     */
+    // Create record (Using unique sql_id to avoid the E11000 error we fixed)
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
@@ -131,12 +113,13 @@ exports.purchaseMembershipCard = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      // 🎯 MESSAGE SYNC: Matches Constants.memberShipVerifyPaymentSuccessMsg
+      // 🎯 Sync with strings.dart: Constants.memberShipPurchaseSuccessMsg
       message: "Membership card purchased successfully", 
       data: {
         payment: {
-          razorpayOrderId: razorpayOrder.id,
-          razorpayPublicKey: process.env.RAZORPAY_KEY_ID,
+          // 🎯 Sync with member_ship_purchase_card_model.dart Payment class
+          razorpay_order_id: razorpayOrder.id,
+          razorpay_public_key: process.env.RAZORPAY_KEY_ID,
           amount: amountInPaise,
         },
         purchased_member_card_id: purchased._id
@@ -144,12 +127,8 @@ exports.purchaseMembershipCard = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("🔥 Final Purchase Fix Error:", error.message);
-    return res.status(500).json({ 
-      status: "false", 
-      message: "Purchase initialization failed",
-      error: error.message 
-    });
+    console.error("🔥 Sync Error:", error.message);
+    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
 
