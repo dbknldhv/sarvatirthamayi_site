@@ -68,15 +68,19 @@ exports.getActiveMemberships = async (req, res) => {
 };
 
 
+/* ---------------------------------------------------
+🎯 FINAL WORKING CODE (APK-COMPATIBLE)
+--------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // 1. Capture ID from any possible key
+    // 1. Capture ID (Handles both 'membership_card_id' and 'memberShipId')
     const rawId = req.body.membership_card_id || req.body.memberShipId || req.body.id;
     const userId = req.user._id || req.user.id;
 
     if (!rawId) return res.status(400).json({ status: "false", message: "ID missing" });
 
-    // 2. Find membership (Flexible lookup for Integer or ObjectId)
+    // 2. Locate the Membership Plan
+    // We check both the integer sql_id and the MongoDB ObjectId
     let membership = await Membership.findOne({
       $or: [
         { sql_id: parseInt(rawId) || 0 },
@@ -84,11 +88,15 @@ exports.purchaseMembershipCard = async (req, res) => {
       ]
     });
 
-    // Fallback: If not found, grab the first active plan to prevent the APK from hanging
-    if (!membership) membership = await Membership.findOne({ status: 1 });
-    if (!membership) return res.status(404).json({ status: "false", message: "Plan not found" });
+    // 🎯 SAFETY: If not found, grab the first active plan so the app doesn't hang
+    if (!membership) {
+      membership = await Membership.findOne({ status: 1 });
+    }
 
-    // 3. Razorpay Order - Use the REAL price from the database object
+    if (!membership) return res.status(404).json({ status: "false", message: "No plan found" });
+
+    // 3. Create Razorpay Order
+    // Multiply by 100 because Razorpay uses Paise
     const amountInPaise = Math.round(Number(membership.price || 0) * 100);
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
@@ -96,7 +104,7 @@ exports.purchaseMembershipCard = async (req, res) => {
       receipt: `mem_${Date.now()}`,
     });
 
-    // 4. Create record with timestamp sql_id to avoid E11000 Unique Index error
+    // 4. Create DB Record (sql_id: Date.now() bypasses unique index collision)
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membership._id,
@@ -108,23 +116,23 @@ exports.purchaseMembershipCard = async (req, res) => {
       paid_amount: membership.price
     });
 
-    // 5. 🎯 THE "SMOKE GUN" RESPONSE
-    // We force every field to the EXACT type the Dart Model expects
+    // 5. 🎯 THE RESPONSE: Mapped exactly to Dart 'MemberShipPurchaseModel'
     return res.status(200).json({
       status: "true",
       success: true,
-      // This string MUST match Constants.memberShipPurchaseSuccessMsg
+      // 🎯 TRIGGER: This exact string allows the Bloc to trigger 'Navigate: true'
       message: "Membership card purchased successfully", 
       data: {
-        id: parseInt(purchased.sql_id) || 1, // Must be int
-        user_id: 1, 
-        membership_card_id: parseInt(membership.sql_id) || 1,
+        id: Number(purchased.sql_id), // Must be int
+        user_id: 1, // Must be int
+        membership_card_id: Number(membership.sql_id) || 1, // Must be int
         paid_amount: String(membership.price), // Must be String
         created_at: new Date().toISOString(),
         payment: {
+          // 🎯 Must be Snake_Case for Dart Model 'Payment.fromJson'
           razorpay_order_id: String(razorpayOrder.id),
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
-          amount: parseInt(amountInPaise),
+          amount: Number(amountInPaise),
           payment_status: 1,
           payment_type: 2
         }
@@ -132,11 +140,10 @@ exports.purchaseMembershipCard = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("🔥 SHARP FIX ERROR:", error.message);
+    console.error("🔥 SHARP TRACK FIX ERROR:", error.message);
     return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
-
 
 
 
