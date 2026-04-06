@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"c4a39075eb4444f2a0b53e3bc1de81c0","collectionName":"member_card_temples","type":"collection"}

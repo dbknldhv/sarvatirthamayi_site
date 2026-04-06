@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"cb0cbd61f9e547338ec29c50899f075e","collectionName":"PurchasedMemberCard","type":"collection"}
