@@ -2,16 +2,12 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 /**
- * FINAL AUTH MIDDLEWARE
- * Handles:
- * - JWT verification
- * - Mongo user id
- * - numeric sql_id fallback
- * - old tokens safely
+ * Protect Routes: Verifies JWT and checks if User exists in the new DB
  */
 exports.protect = async (req, res, next) => {
   let token;
 
+  // 1. Extract Token from Header
   if (
     req.headers.authorization &&
     req.headers.authorization.startsWith("Bearer ")
@@ -19,20 +15,24 @@ exports.protect = async (req, res, next) => {
     try {
       token = req.headers.authorization.split(" ")[1];
 
+      // 2. Verify JWT
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+      // 3. 🎯 THE FIX: Fetch user and handle "User Not Found" after migration
       const user = await User.findById(decoded.id)
         .select("_id sql_id user_type role first_name email")
         .lean();
 
       if (!user) {
+        // This triggers the 'Token Expired' redirect in your Flutter code
         return res.status(401).json({
           status: "false",
           success: false,
-          message: "User account no longer exists.",
+          message: "User account no longer exists. Please login again.",
         });
       }
 
+      // 4. Handle Legacy SQL_ID (Compatibility for your Flutter models)
       const dbSqlId =
         user.sql_id !== undefined && user.sql_id !== null
           ? Number(user.sql_id)
@@ -50,6 +50,7 @@ exports.protect = async (req, res, next) => {
         finalSqlId = tokenSqlId;
       }
 
+      // 5. Attach formatted user object to request
       req.user = {
         ...user,
         _id: String(user._id),
@@ -58,14 +59,12 @@ exports.protect = async (req, res, next) => {
       };
 
       if (req.user.sql_id === 0) {
-        console.warn(
-          `⚠️ Warning: User ${decoded.id} has no valid sql_id. Some legacy numeric relations may fail until corrected in DB.`
-        );
+        console.warn(`⚠️ Warning: User ${decoded.id} has no valid sql_id.`);
       }
 
       return next();
     } catch (error) {
-      console.error("🔥 Auth Error:", error.message);
+      console.error("🔥 Auth Middleware Error:", error.message);
 
       let message = "Not authorized, token failed";
       if (error.name === "TokenExpiredError") {
@@ -77,11 +76,12 @@ exports.protect = async (req, res, next) => {
       return res.status(401).json({
         status: "false",
         success: false,
-        message,
+        message: message,
       });
     }
   }
 
+  // No token found
   return res.status(401).json({
     status: "false",
     success: false,
@@ -119,7 +119,7 @@ exports.authorize = (...types) => {
 };
 
 /**
- * Admin only
+ * Admin Only Access
  */
 exports.adminOnly = (req, res, next) => {
   if (
