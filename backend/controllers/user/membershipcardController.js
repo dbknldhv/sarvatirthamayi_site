@@ -68,7 +68,7 @@ exports.purchaseMembershipCard = async (req, res) => {
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    // 1. Force fetch from DB to ensure we have the REAL price
+    // 1. Always fetch the REAL price from the DB based on the ID sent
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
@@ -80,20 +80,19 @@ exports.purchaseMembershipCard = async (req, res) => {
       return res.status(404).json({ status: "false", message: "Plan not found" });
     }
 
-    const price = Number(membershipPlan.price);
-    const amountInPaise = Math.round(price * 100);
+    const correctPrice = Number(membershipPlan.price);
+    const amountInPaise = Math.round(correctPrice * 100);
 
-    // 2. 🎯 THE STICKY FIX: Generate a highly unique Receipt ID
-    // This forces Razorpay to treat every "Continue" click as a brand new person
-    const receiptId = `rcpt_${userId}_${rawId}_${Date.now()}`;
-
+    // 2. 🎯 THE "NO-FLUTTER-CHANGE" FIX:
+    // Create a unique receipt with a timestamp. This forces Razorpay 
+    // to treat this as a NEW payment session, ignoring the app's cache.
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      receipt: receiptId,
+      receipt: `order_${userId}_${Date.now()}`, 
     });
 
-    // 3. Create the record
+    // 3. Create the Record
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membershipPlan._id,
@@ -101,31 +100,34 @@ exports.purchaseMembershipCard = async (req, res) => {
       card_status: 0,
       payment_status: 1,
       razorpay_order_id: razorpayOrder.id,
-      paid_amount: price,
+      paid_amount: correctPrice,
     });
 
-    // 4. THE RESPONSE
+    // 4. THE RESPONSE (Strictly matches your existing Flutter Model)
     return res.status(200).json({
       status: "true",
       success: true,
+      // 🎯 This message triggers the Flutter 'listener'
       message: "Membership card purchased successfully", 
       data: {
         id: Number(purchased.sql_id),
-        user_id: 1,
-        membership_card_id: Number(membershipPlan.sql_id),
-        paid_amount: String(price), // This is the value Flutter SHOULD use
+        user_id: 1, 
+        membership_card_id: Number(membershipPlan.sql_id) || 1,
+        // We return the price here; Flutter uses widget.paidAmt, 
+        // but the ORDER_ID will now point to this CORRECT price.
+        paid_amount: String(correctPrice), 
         payment: {
           razorpay_order_id: String(razorpayOrder.id),
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
-          amount: Number(amountInPaise),
+          // We keep these fields standard so the app doesn't crash
           payment_status: 1,
           payment_type: 2
         }
       }
     });
   } catch (error) {
-    console.error("🔥 Error:", error.message);
-    res.status(500).json({ status: "false", message: "Gateway error" });
+    console.error("🔥 Backend Error:", error.message);
+    res.status(500).json({ status: "false", message: "Internal Server Error" });
   }
 };
 
