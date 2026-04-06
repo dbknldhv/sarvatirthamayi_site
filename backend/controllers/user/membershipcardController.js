@@ -67,68 +67,56 @@ exports.getActiveMemberships = async (req, res) => {
   }
 };
 
-/* ---------------------------------------------------
-🎯 FINAL BULLETPROOF FIX (APK-LOCKED VERSION)
---------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // 1. Capture the ID from any possible key name
-    const rawId = req.body.membership_card_id || req.body.memberShipId || req.body.id;
+    const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    if (!rawId) return res.status(400).json({ status: "false", message: "ID missing" });
-
-    // 2. Locate the plan (Handles Number, String, and ObjectId)
-    let membership = await Membership.findOne({ 
+    // 1. Find the plan from the 'memberships' collection
+    const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
         { _id: mongoose.Types.ObjectId.isValid(rawId) ? rawId : null }
       ] 
     });
 
-    // 🎯 SAFETY FALLBACK: If plan not found, force a valid object so the APK doesn't hang
-    if (!membership) {
-       membership = await Membership.findOne({ status: 1 }); 
+    if (!membershipPlan) {
+      return res.status(404).json({ status: "false", message: "Plan not found" });
     }
 
-    if (!membership) return res.status(404).json({ status: "false", message: "No plans found" });
-
-    // 🎯 REAL PRICE: Pull directly from found membership. No more hardcoded 100 paise.
-    const amountInPaise = Math.round(Number(membership.price || 0) * 100);
-
-    // 3. Create Razorpay Order
+    // 2. Razorpay Setup (Paise conversion)
+    const amountInPaise = Math.round(Number(membershipPlan.price) * 100);
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
       receipt: `mem_${Date.now()}`,
     });
 
-    // 4. Create DB Record (Timestamp as sql_id to bypass unique index error)
+    // 3. Create the Purchase Record
+    // 🎯 THE FIX: Use Date.now() for sql_id to bypass the 'Unique 1' collision
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
-      membership_card_id: membership._id,
-      sql_id: Date.now(), 
+      membership_card_id: membershipPlan._id,
+      sql_id: Date.now(), // This ensures no collision with existing documents
       card_status: 0,
       payment_status: 1,
-      max_visits: membership.visits,
+      max_visits: membershipPlan.visits,
       razorpay_order_id: razorpayOrder.id,
-      paid_amount: membership.price
+      paid_amount: membershipPlan.price,
+      membership_card_amount: membershipPlan.price
     });
 
-    // 5. THE DATA RESPONSE: Type-casted exactly for Dart Models
+    // 4. THE RESPONSE (Strictly for your compiled APK)
     return res.status(200).json({
       status: "true",
       success: true,
-      // 🎯 TRIGGER: MUST match Constants.memberShipPurchaseSuccessMsg in APK
       message: "Membership card purchased successfully", 
       data: {
-        id: Number(purchased.sql_id) || 1, // Must be int
-        user_id: 1, // Must be int
-        membership_card_id: Number(membership.sql_id) || 1, // Must be int
-        paid_amount: String(membership.price), // MUST BE STRING for model
-        created_at: new Date().toISOString(),
+        id: Number(purchased.sql_id), // APK expects int
+        user_id: 1, 
+        membership_card_id: Number(membershipPlan.sql_id) || 1, 
+        paid_amount: String(membershipPlan.price), // 🎯 MUST BE STRING
         payment: {
-          // MUST be Snake_Case for Payment.fromJson in your APK
           razorpay_order_id: String(razorpayOrder.id),
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
           amount: Number(amountInPaise),
@@ -139,11 +127,10 @@ exports.purchaseMembershipCard = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("🔥 SMOKING GUN RECOVERY:", error.message);
+    console.error("🔥 SMOKE GUN RECOVERY:", error.message);
     return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
   }
 };
-
 
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Activation)
