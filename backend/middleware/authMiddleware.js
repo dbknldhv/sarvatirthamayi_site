@@ -2,7 +2,8 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
 /**
- * Protect Routes: Verifies JWT and checks if User exists in the new DB
+ * Protect Routes: Verifies JWT and checks if User exists in the DB.
+ * Uses HTTP 403 for missing users to prevent Flutter "Token Expired" crashes.
  */
 exports.protect = async (req, res, next) => {
   let token;
@@ -18,21 +19,25 @@ exports.protect = async (req, res, next) => {
       // 2. Verify JWT
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-      // 3. 🎯 THE FIX: Fetch user and handle "User Not Found" after migration
+      // 3. 🎯 THE FIX: Fetch user and handle "User Not Found"
       const user = await User.findById(decoded.id)
         .select("_id sql_id user_type role first_name email")
         .lean();
 
       if (!user) {
-        // This triggers the 'Token Expired' redirect in your Flutter code
-        return res.status(401).json({
+        /**
+         * 🎯 CRITICAL CHANGE: Returning 403 instead of 401.
+         * Your Flutter 'buildHttpResponse' throws an exception on 401.
+         * By sending 403, 'handleResponse' will show the toast without crashing.
+         */
+        return res.status(403).json({
           status: "false",
           success: false,
-          message: "User account no longer exists. Please login again.",
+          message: "Account not found. Please Sign Up again.",
         });
       }
 
-      // 4. Handle Legacy SQL_ID (Compatibility for your Flutter models)
+      // 4. Handle Legacy SQL_ID (Compatibility for Flutter models)
       const dbSqlId =
         user.sql_id !== undefined && user.sql_id !== null
           ? Number(user.sql_id)
@@ -73,6 +78,7 @@ exports.protect = async (req, res, next) => {
         message = "Invalid token. Please login again.";
       }
 
+      // Keep 401 for actual token failures to trigger standard logout logic
       return res.status(401).json({
         status: "false",
         success: false,
