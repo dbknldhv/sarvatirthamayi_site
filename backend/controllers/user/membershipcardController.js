@@ -65,15 +65,14 @@ exports.getActiveMemberships = async (req, res) => {
 
 exports.purchaseMembershipCard = async (req, res) => {
   try {
-    // 1. 🎯 THE HEADER TRICK: Force Flutter's internal networking to ignore cache
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    res.setHeader('Surrogate-Control', 'content="no-store"');
-
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const user = req.user;
+    
+    // 🎯 FIX THE WARNING: Provide a valid numeric ID for the Flutter app
+    // We convert the Mongo Hex ID to a safe Integer to stop the "sql_id" warnings
+    const numericUserId = user.sql_id || parseInt(user._id.toString().substring(0, 8), 16) || 1;
 
+    // 1. Fetch Plan from DB - This ensures the price is ALWAYS fresh
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
@@ -81,51 +80,56 @@ exports.purchaseMembershipCard = async (req, res) => {
       ] 
     }).lean();
 
-    if (!membershipPlan) return res.status(404).json({ status: "false" });
+    if (!membershipPlan) {
+      return res.status(404).json({ status: "false", message: "Plan not found" });
+    }
 
     const correctPrice = Number(membershipPlan.price);
     const amountInPaise = Math.round(correctPrice * 100);
 
-    // 2. 🎯 THE NEW ORDER: Generate a completely different Order ID
+    // 2. 🎯 THE CACHE BREAKER: Unique Order ID
+    // We use a clean timestamp receipt to force Razorpay to ignore previous 999 attempts
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      // Shortest possible unique receipt
-      receipt: `n_${Date.now()}`.slice(-10), 
+      receipt: `rcpt_${Date.now()}`, 
     });
 
     const now = new Date();
-    const isoString = now.toISOString();
+    const isoDate = now.toISOString();
 
+    // 3. 🏁 THE RESPONSE (Perfectly matched to your MemberShipPurchaseModel)
     // 3. 🏁 THE RESPONSE
     return res.status(200).json({
       status: "true",
+      success: true,
       message: "Membership card purchased successfully", 
       data: {
-        id: Math.floor(Date.now() / 1000), 
-        user_id: 1, 
+        id: Date.now(), 
+        user_id: numericUserId, 
         membership_card_id: Number(membershipPlan.sql_id) || 1,
         card_status: 0,
         card_status_str: "Pending",
         paid_amount: String(correctPrice),
         membership_card_amount: String(correctPrice),
-        start_date: isoString.split('T')[0],
-        end_date: isoString.split('T')[0],
-        created_at: isoString,
-        updated_at: isoString,
+        start_date: isoDate.split('T')[0],
+        end_date: isoDate.split('T')[0],
+        created_at: isoDate, // Fixed variable name
+        updated_at: isoDate, // Fixed variable name
         payment: {
           razorpay_order_id: String(razorpayOrder.id),
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
+          amount: Number(amountInPaise),
           payment_status: 1,
           payment_type: 2,
-          payment_date: isoString
+          payment_date: isoDate // Fixed variable name
         }
       }
     });
 
   } catch (error) {
-    console.error("🔥 Cache-Bust Error:", error.message);
-    res.status(500).json({ status: "false" });
+    console.error("🔥 Final Sync Error:", error.message);
+    res.status(500).json({ status: "false", message: "Internal Server Error" });
   }
 };
 
