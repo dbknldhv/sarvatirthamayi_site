@@ -65,11 +65,15 @@ exports.getActiveMemberships = async (req, res) => {
 
 exports.purchaseMembershipCard = async (req, res) => {
   try {
+    // 1. 🎯 THE HEADER TRICK: Force Flutter's internal networking to ignore cache
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'content="no-store"');
+
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const user = req.user;
-    const mongoUserId = user._id || user.id;
 
-    // 1. Fetch Plan from DB - Absolute Truth
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
@@ -77,62 +81,53 @@ exports.purchaseMembershipCard = async (req, res) => {
       ] 
     }).lean();
 
-    if (!membershipPlan) {
-      return res.status(404).json({ status: "false", message: "Plan not found" });
-    }
+    if (!membershipPlan) return res.status(404).json({ status: "false" });
 
     const correctPrice = Number(membershipPlan.price);
     const amountInPaise = Math.round(correctPrice * 100);
 
-    // 🎯 THE CACHE BREAKER: Fresh Order ID with a numeric receipt
+    // 2. 🎯 THE NEW ORDER: Generate a completely different Order ID
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      receipt: `r_${Date.now()}`.substring(0, 40), 
+      // Shortest possible unique receipt
+      receipt: `n_${Date.now()}`.slice(-10), 
     });
 
     const now = new Date();
     const isoString = now.toISOString();
 
-    // 🎯 THE NUCLEAR OPTION: Add a 200ms delay to force the Flutter Async state to reset
-    setTimeout(() => {
-      return res.status(200).json({
-        status: "true",
-        // This triggers the specific listener in your APK
-        message: "Membership card purchased successfully", 
-        data: {
-          id: Math.floor(Date.now() / 1000), 
-          user_id: 1, 
-          membership_card_id: Number(membershipPlan.sql_id) || 1,
-          card_status: 0,
-          card_status_str: "Pending",
-          start_date: isoString.split('T')[0],
-          end_date: isoString.split('T')[0],
-          offer_id: 0,
-          offer_discount_amount: "0",
-          // 🎯 FILL ALL POSSIBLE PRICE FIELDS
-          membership_card_amount: String(correctPrice), 
-          paid_amount: String(correctPrice),
-          created_at: isoString,
-          updated_at: isoString,
-          payment: {
-            razorpay_order_id: String(razorpayOrder.id),
-            razorpay_payment_id: "",
-            razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
-            payment_status: 1,
-            payment_type: 2,
-            payment_date: isoString
-          }
+    // 3. 🏁 THE RESPONSE
+    return res.status(200).json({
+      status: "true",
+      message: "Membership card purchased successfully", 
+      data: {
+        id: Math.floor(Date.now() / 1000), 
+        user_id: 1, 
+        membership_card_id: Number(membershipPlan.sql_id) || 1,
+        card_status: 0,
+        card_status_str: "Pending",
+        paid_amount: String(correctPrice),
+        membership_card_amount: String(correctPrice),
+        start_date: isoString.split('T')[0],
+        end_date: isoString.split('T')[0],
+        created_at: isoString,
+        updated_at: isoString,
+        payment: {
+          razorpay_order_id: String(razorpayOrder.id),
+          razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
+          payment_status: 1,
+          payment_type: 2,
+          payment_date: isoString
         }
-      });
-    }, 200);
+      }
+    });
 
   } catch (error) {
-    console.error("🔥 Final Attempt Error:", error.message);
-    res.status(500).json({ status: "false", message: "Server error" });
+    console.error("🔥 Cache-Bust Error:", error.message);
+    res.status(500).json({ status: "false" });
   }
 };
-
 
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Activation)
