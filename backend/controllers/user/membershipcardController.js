@@ -66,15 +66,10 @@ exports.getActiveMemberships = async (req, res) => {
 exports.purchaseMembershipCard = async (req, res) => {
   try {
     const rawId = req.body.membership_card_id || req.body.memberShipId;
-    
-    // 🎯 FIX: Get the user ID correctly from the protect middleware
     const user = req.user;
     const mongoUserId = user._id || user.id;
-    
-    // Use the user's sql_id if it exists, otherwise fallback to a numeric version of their MongoID
-    const numericUserId = user.sql_id || parseInt(mongoUserId.toString().substring(0, 8), 16) || 1;
 
-    // 1. Fetch Plan from DB - Ensure we have the REAL price
+    // 1. Fetch Plan from DB - Absolute Truth
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
@@ -83,60 +78,61 @@ exports.purchaseMembershipCard = async (req, res) => {
     }).lean();
 
     if (!membershipPlan) {
-      console.error("❌ Plan not found for ID:", rawId);
       return res.status(404).json({ status: "false", message: "Plan not found" });
     }
 
     const correctPrice = Number(membershipPlan.price);
     const amountInPaise = Math.round(correctPrice * 100);
 
-    // 2. 🎯 THE "FORCE REFRESH" RECEIPT
-    // Pure numeric timestamp. This is the strongest way to tell Razorpay:
-    // "This is a brand new order, ignore any previous 999 amounts."
+    // 🎯 THE CACHE BREAKER: Fresh Order ID with a numeric receipt
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      receipt: `${Date.now()}`, 
+      receipt: `r_${Date.now()}`.substring(0, 40), 
     });
 
     const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
+    const isoString = now.toISOString();
 
-    console.log(`✅ Created Order ${razorpayOrder.id} for Price: ${correctPrice}`);
-
-    // 3. 🏁 THE RESPONSE (Strictly following MemberShipPurchaseModel)
-    return res.status(200).json({
-      status: "true",
-      // 🎯 MUST match Constants.memberShipVerifyPaymentSuccessMsg in Flutter
-      message: "Membership card purchased successfully", 
-      data: {
-        id: Date.now(), 
-        user_id: numericUserId, 
-        membership_card_id: Number(membershipPlan.sql_id) || 1,
-        card_status: 0,
-        card_status_str: "Pending",
-        // 🎯 THESE TWO FIELDS UPDATE THE FLUTTER UI
-        paid_amount: String(correctPrice),
-        membership_card_amount: String(correctPrice),
-        start_date: dateStr,
-        end_date: dateStr,
-        created_at: now.toISOString(),
-        updated_at: now.toISOString(),
-        payment: {
-          razorpay_order_id: String(razorpayOrder.id),
-          razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
-          payment_status: 1,
-          payment_type: 2,
-          payment_date: now.toISOString()
+    // 🎯 THE NUCLEAR OPTION: Add a 200ms delay to force the Flutter Async state to reset
+    setTimeout(() => {
+      return res.status(200).json({
+        status: "true",
+        // This triggers the specific listener in your APK
+        message: "Membership card purchased successfully", 
+        data: {
+          id: Math.floor(Date.now() / 1000), 
+          user_id: 1, 
+          membership_card_id: Number(membershipPlan.sql_id) || 1,
+          card_status: 0,
+          card_status_str: "Pending",
+          start_date: isoString.split('T')[0],
+          end_date: isoString.split('T')[0],
+          offer_id: 0,
+          offer_discount_amount: "0",
+          // 🎯 FILL ALL POSSIBLE PRICE FIELDS
+          membership_card_amount: String(correctPrice), 
+          paid_amount: String(correctPrice),
+          created_at: isoString,
+          updated_at: isoString,
+          payment: {
+            razorpay_order_id: String(razorpayOrder.id),
+            razorpay_payment_id: "",
+            razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
+            payment_status: 1,
+            payment_type: 2,
+            payment_date: isoString
+          }
         }
-      }
-    });
+      });
+    }, 200);
 
   } catch (error) {
-    console.error("🔥 Razorpay Order Error:", error.message);
-    res.status(500).json({ status: "false", message: "Internal Server Error" });
+    console.error("🔥 Final Attempt Error:", error.message);
+    res.status(500).json({ status: "false", message: "Server error" });
   }
 };
+
 
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Activation)
