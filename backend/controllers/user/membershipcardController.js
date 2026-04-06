@@ -63,14 +63,12 @@ exports.getActiveMemberships = async (req, res) => {
   }
 };
 
-
 exports.purchaseMembershipCard = async (req, res) => {
   try {
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    // 1. 🎯 ALWAYS FETCH FRESH FROM DB
-    // This ignores whatever "price" the app thinks it has.
+    // 1. Force fetch from DB to ensure we have the REAL price
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
@@ -82,41 +80,40 @@ exports.purchaseMembershipCard = async (req, res) => {
       return res.status(404).json({ status: "false", message: "Plan not found" });
     }
 
-    const correctPrice = Number(membershipPlan.price);
-    const amountInPaise = Math.round(correctPrice * 100);
+    const price = Number(membershipPlan.price);
+    const amountInPaise = Math.round(price * 100);
 
-    // 2. 🎯 UNIQUE RECEIPT PER CLICK
-    // This forces Razorpay to generate a fresh payment session.
+    // 2. 🎯 THE STICKY FIX: Generate a highly unique Receipt ID
+    // This forces Razorpay to treat every "Continue" click as a brand new person
+    const receiptId = `rcpt_${userId}_${rawId}_${Date.now()}`;
+
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      receipt: `mem_${userId}_${rawId}_${Date.now()}`, 
+      receipt: receiptId,
     });
 
-    // 3. Create Record
+    // 3. Create the record
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membershipPlan._id,
       sql_id: Date.now(),
       card_status: 0,
-      payment_status: 1, // Pending
+      payment_status: 1,
       razorpay_order_id: razorpayOrder.id,
-      paid_amount: correctPrice,
-      membership_card_amount: correctPrice
+      paid_amount: price,
     });
 
-    // 4. 🏁 THE RESPONSE
-    // Return the response in the exact structure the APK expects.
+    // 4. THE RESPONSE
     return res.status(200).json({
       status: "true",
       success: true,
       message: "Membership card purchased successfully", 
       data: {
         id: Number(purchased.sql_id),
-        user_id: 1, 
-        membership_card_id: toInt(membershipPlan.sql_id) || 1,
-        // Sending this back as a string helps some internal Flutter parsing
-        paid_amount: String(correctPrice), 
+        user_id: 1,
+        membership_card_id: Number(membershipPlan.sql_id),
+        paid_amount: String(price), // This is the value Flutter SHOULD use
         payment: {
           razorpay_order_id: String(razorpayOrder.id),
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
@@ -127,11 +124,10 @@ exports.purchaseMembershipCard = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("🔥 Razorpay Order Error:", error.message);
-    res.status(500).json({ status: "false", message: "Internal Server Error" });
+    console.error("🔥 Error:", error.message);
+    res.status(500).json({ status: "false", message: "Gateway error" });
   }
 };
-
 
 /* ---------------------------------------------------
 3️⃣ VERIFY PAYMENT (Activation)
