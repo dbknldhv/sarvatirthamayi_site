@@ -68,7 +68,7 @@ exports.purchaseMembershipCard = async (req, res) => {
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    // 1. Always fetch the REAL price from the DB based on the ID sent
+    // 1. Fetch Plan from DB - Ensuring we have the LATEST price
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
@@ -83,16 +83,16 @@ exports.purchaseMembershipCard = async (req, res) => {
     const correctPrice = Number(membershipPlan.price);
     const amountInPaise = Math.round(correctPrice * 100);
 
-    // 2. 🎯 THE "NO-FLUTTER-CHANGE" FIX:
-    // Create a unique receipt with a timestamp. This forces Razorpay 
-    // to treat this as a NEW payment session, ignoring the app's cache.
+    // 2. 🎯 THE STICKY FIX: Unique Receipt ID
+    // Forces Razorpay to generate a fresh Order ID for the NEW price.
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      receipt: `order_${userId}_${Date.now()}`, 
+      receipt: `mem_${Date.now()}`, 
     });
 
     // 3. Create the Record
+    const now = new Date();
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membershipPlan._id,
@@ -101,32 +101,41 @@ exports.purchaseMembershipCard = async (req, res) => {
       payment_status: 1,
       razorpay_order_id: razorpayOrder.id,
       paid_amount: correctPrice,
+      membership_card_amount: correctPrice
     });
 
-    // 4. THE RESPONSE (Strictly matches your existing Flutter Model)
+    // 4. 🏁 THE RESPONSE (Strictly matching your Dart Model)
     return res.status(200).json({
       status: "true",
-      success: true,
-      // 🎯 This message triggers the Flutter 'listener'
-      message: "Membership card purchased successfully", 
+      message: "Membership card purchased successfully", // Triggers Flutter Listener
       data: {
         id: Number(purchased.sql_id),
-        user_id: 1, 
+        user_id: 1, // Legacy requirement
         membership_card_id: Number(membershipPlan.sql_id) || 1,
-        // We return the price here; Flutter uses widget.paidAmt, 
-        // but the ORDER_ID will now point to this CORRECT price.
-        paid_amount: String(correctPrice), 
+        card_status: 0,
+        card_status_str: "Pending",
+        start_date: now.toISOString().split('T')[0],
+        end_date: now.toISOString().split('T')[0],
+        offer_id: 0,
+        offer_discount_amount: "0",
+        // 🎯 CRITICAL: These two fields update the Flutter UI Price
+        membership_card_amount: String(correctPrice), 
+        paid_amount: String(correctPrice),
+        created_at: now.toISOString(),
+        updated_at: now.toISOString(),
         payment: {
           razorpay_order_id: String(razorpayOrder.id),
+          razorpay_payment_id: "",
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
-          // We keep these fields standard so the app doesn't crash
           payment_status: 1,
-          payment_type: 2
+          payment_type: 2,
+          payment_date: now.toISOString()
         }
       }
     });
+
   } catch (error) {
-    console.error("🔥 Backend Error:", error.message);
+    console.error("🔥 Final Refactor Error:", error.message);
     res.status(500).json({ status: "false", message: "Internal Server Error" });
   }
 };
