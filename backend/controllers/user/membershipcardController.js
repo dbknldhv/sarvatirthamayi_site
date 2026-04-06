@@ -68,7 +68,7 @@ exports.purchaseMembershipCard = async (req, res) => {
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const userId = req.user._id || req.user.id;
 
-    // 1. Fetch Plan from DB - Ensuring we have the LATEST price
+    // 1. Fetch Plan from DB - Get the CORRECT price based on the current selection
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
@@ -83,49 +83,37 @@ exports.purchaseMembershipCard = async (req, res) => {
     const correctPrice = Number(membershipPlan.price);
     const amountInPaise = Math.round(correctPrice * 100);
 
-    // 2. 🎯 THE STICKY FIX: Unique Receipt ID
-    // Forces Razorpay to generate a fresh Order ID for the NEW price.
+    // 2. 🎯 THE UNIQUE RECEIPT TRICK
+    // By using a random timestamp as the receipt, we force the Razorpay Flutter SDK 
+    // to treat this as a brand new checkout, ignoring the previous 999 price.
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      receipt: `mem_${Date.now()}`, 
+      receipt: `receipt_id_${Date.now()}`, 
     });
 
-    // 3. Create the Record
     const now = new Date();
-    const purchased = await PurchasedMemberCard.create({
-      user_id: userId,
-      membership_card_id: membershipPlan._id,
-      sql_id: Date.now(),
-      card_status: 0,
-      payment_status: 1,
-      razorpay_order_id: razorpayOrder.id,
-      paid_amount: correctPrice,
-      membership_card_amount: correctPrice
-    });
 
-    // 4. 🏁 THE RESPONSE (Strictly matching your Dart Model)
+    // 3. 🏁 THE RESPONSE (Strictly following your MemberShipPurchaseModel)
     return res.status(200).json({
       status: "true",
-      message: "Membership card purchased successfully", // Triggers Flutter Listener
+      // This message MUST match Constants.memberShipVerifyPaymentSuccessMsg to trigger the listener
+      message: "Membership card purchased successfully", 
       data: {
-        id: Number(purchased.sql_id),
-        user_id: 1, // Legacy requirement
+        id: Date.now(), // Unique ID for the purchase record
+        user_id: 1, 
         membership_card_id: Number(membershipPlan.sql_id) || 1,
         card_status: 0,
         card_status_str: "Pending",
+        // 🎯 THESE TWO FIELDS FORCE THE FLUTTER UI TO SHOW THE NEW PRICE
+        paid_amount: String(correctPrice),
+        membership_card_amount: String(correctPrice),
         start_date: now.toISOString().split('T')[0],
         end_date: now.toISOString().split('T')[0],
-        offer_id: 0,
-        offer_discount_amount: "0",
-        // 🎯 CRITICAL: These two fields update the Flutter UI Price
-        membership_card_amount: String(correctPrice), 
-        paid_amount: String(correctPrice),
         created_at: now.toISOString(),
         updated_at: now.toISOString(),
         payment: {
           razorpay_order_id: String(razorpayOrder.id),
-          razorpay_payment_id: "",
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
           payment_status: 1,
           payment_type: 2,
@@ -135,7 +123,7 @@ exports.purchaseMembershipCard = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("🔥 Final Refactor Error:", error.message);
+    console.error("🔥 Re-calculating Order Error:", error.message);
     res.status(500).json({ status: "false", message: "Internal Server Error" });
   }
 };
