@@ -30,7 +30,7 @@ exports.protect = async (req, res, next) => {
          * Your Flutter 'buildHttpResponse' throws an exception on 401.
          * By sending 403, 'handleResponse' will show the toast without crashing.
          */
-        return res.status(403).json({
+        return res.status(401).json({
           status: "false",
           success: false,
           message: "Account not found. Please Sign Up again.",
