@@ -20,10 +20,8 @@ const toString = (val) => (val ? String(val) : "");
 
 /**
  * 🎯 THE NORMALIZER (Helper)
- * Ensures every plan sent to Flutter has correct types and field names.
  */
 const normalizeMembershipPlan = (plan = {}) => {
-  // Generate a temporary integer ID from Mongo hex string if sql_id is missing
   const mongoIdInt = plan._id ? parseInt(plan._id.toString().substring(0, 8), 16) : 1;
   const finalId = toInt(plan.sql_id) || mongoIdInt;
 
@@ -45,20 +43,18 @@ const normalizeMembershipPlan = (plan = {}) => {
 exports.getActiveMemberships = async (req, res) => {
   try {
     const plans = await Membership.find({ status: 1 }).sort({ price: 1 }).lean();
-
     const mappedData = plans.map((plan) => normalizeMembershipPlan(plan));
 
     return res.status(200).json({
       status: "true",
       success: true,
-      // Matches Constants.memberShipCardSuccessMsg in Flutter
       message: "Membership card list fetched successfully", 
       data: {
         data: mappedData,
         total_count: mappedData.length,
         is_next: false,
         current_page: 1,
-        next_page_url: null, // Crucial for Bloc _hasMore logic
+        next_page_url: null, 
       },
     });
   } catch (error) {
@@ -67,12 +63,15 @@ exports.getActiveMemberships = async (req, res) => {
   }
 };
 
+/* ---------------------------------------------------
+2️⃣ PURCHASE MEMBERSHIP (Initialize Razorpay)
+--------------------------------------------------- */
 exports.purchaseMembershipCard = async (req, res) => {
   try {
     const rawId = req.body.membership_card_id || req.body.memberShipId;
-    const userId = req.user.id;
+    const userId = req.user._id || req.user.id;
 
-    // 1. Fetch Plan from DB
+    // 1. 🎯 THE DB LOOKUP: Always verify price from DB to stop "Sticky Price"
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
@@ -84,44 +83,42 @@ exports.purchaseMembershipCard = async (req, res) => {
       return res.status(404).json({ status: "false", message: "Plan not found" });
     }
 
-    const amount = Number(membershipPlan.price);
-    const amountInPaise = Math.round(amount * 100);
+    const correctPrice = Number(membershipPlan.price);
+    const amountInPaise = Math.round(correctPrice * 100);
 
-    // 2. 🎯 THE "STICKY" FIX: Use a completely unique receipt every time.
-    // This prevents the app from reusing a previous successful order calculation.
+    // 2. 🎯 UNIQUE RECEIPT: Prevents Razorpay from reusing old price calculations
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      receipt: `order_rcpt_${userId}_${Date.now()}`, 
+      receipt: `mem_${userId}_${rawId}_${Date.now()}`, 
     });
 
-    // 3. Create the Record
+    // 3. Create the Purchase Record (Pending)
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membershipPlan._id,
       sql_id: Date.now(),
       card_status: 0,
-      payment_status: 1,
+      payment_status: 1, // Pending
       razorpay_order_id: razorpayOrder.id,
-      paid_amount: amount,
+      paid_amount: correctPrice,
+      membership_card_amount: correctPrice
     });
 
-    // 4. THE RESPONSE
+    // 4. 🏁 THE RESPONSE (Strictly for compiled APK compatibility)
     return res.status(200).json({
       status: "true",
       success: true,
-      // 🎯 We MUST match the 'Constants.memberShipVerifyPaymentSuccessMsg'
+      // Matches Constants.memberShipVerifyPaymentSuccessMsg in Flutter
       message: "Membership card purchased successfully", 
       data: {
         id: Number(purchased.sql_id),
-        user_id: 1,
-        membership_card_id: Number(membershipPlan.sql_id),
-        // 🎯 Return the price as a string to help the Flutter UI update
-        paid_amount: String(amount), 
+        user_id: 1, // Static fallback for legacy model
+        membership_card_id: toInt(membershipPlan.sql_id) || 1,
+        paid_amount: toString(correctPrice), // Helps Flutter UI update
         payment: {
-          razorpay_order_id: String(razorpayOrder.id),
-          razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
-          // 🎯 Force the correct amount here
+          razorpay_order_id: toString(razorpayOrder.id),
+          razorpay_public_key: toString(process.env.RAZORPAY_KEY_ID),
           amount: Number(amountInPaise),
           payment_status: 1,
           payment_type: 2
@@ -129,7 +126,7 @@ exports.purchaseMembershipCard = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("🔥 Error:", error.message);
+    console.error("🔥 Purchase Initialization Error:", error.message);
     res.status(500).json({ status: "false", message: "Internal Server Error" });
   }
 };
@@ -167,7 +164,6 @@ exports.verifyMembershipPayment = async (req, res) => {
     return res.status(200).json({
       status: "true",
       success: true,
-      // Matches Constants.memberShipVerifyPaymentSuccessMsg in strings.dart
       message: "Membership card purchased successfully" 
     });
   } catch (error) {
