@@ -70,65 +70,67 @@ exports.getActiveMemberships = async (req, res) => {
 exports.purchaseMembershipCard = async (req, res) => {
   try {
     const rawId = req.body.membership_card_id || req.body.memberShipId;
-    const userId = req.user._id || req.user.id;
+    const userId = req.user.id;
 
-    // 1. Find the plan from the 'memberships' collection
+    // 1. Fetch Plan from DB
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
         { _id: mongoose.Types.ObjectId.isValid(rawId) ? rawId : null }
       ] 
-    });
+    }).lean();
 
     if (!membershipPlan) {
       return res.status(404).json({ status: "false", message: "Plan not found" });
     }
 
-    // 2. Razorpay Setup (Paise conversion)
-    const amountInPaise = Math.round(Number(membershipPlan.price) * 100);
+    const amount = Number(membershipPlan.price);
+    const amountInPaise = Math.round(amount * 100);
+
+    // 2. 🎯 THE "STICKY" FIX: Use a completely unique receipt every time.
+    // This prevents the app from reusing a previous successful order calculation.
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      receipt: `mem_${Date.now()}`,
+      receipt: `order_rcpt_${userId}_${Date.now()}`, 
     });
 
-    // 3. Create the Purchase Record
-    // 🎯 THE FIX: Use Date.now() for sql_id to bypass the 'Unique 1' collision
+    // 3. Create the Record
     const purchased = await PurchasedMemberCard.create({
       user_id: userId,
       membership_card_id: membershipPlan._id,
-      sql_id: Date.now(), // This ensures no collision with existing documents
+      sql_id: Date.now(),
       card_status: 0,
       payment_status: 1,
-      max_visits: membershipPlan.visits,
       razorpay_order_id: razorpayOrder.id,
-      paid_amount: membershipPlan.price,
-      membership_card_amount: membershipPlan.price
+      paid_amount: amount,
     });
 
-    // 4. THE RESPONSE (Strictly for your compiled APK)
+    // 4. THE RESPONSE
     return res.status(200).json({
       status: "true",
       success: true,
+      // 🎯 We MUST match the 'Constants.memberShipVerifyPaymentSuccessMsg'
       message: "Membership card purchased successfully", 
       data: {
-        id: Number(purchased.sql_id), // APK expects int
-        user_id: 1, 
-        membership_card_id: Number(membershipPlan.sql_id) || 1, 
-        paid_amount: String(membershipPlan.price), // 🎯 MUST BE STRING
+        id: Number(purchased.sql_id),
+        user_id: 1,
+        membership_card_id: Number(membershipPlan.sql_id),
+        // 🎯 Return the price as a string to help the Flutter UI update
+        paid_amount: String(amount), 
         payment: {
           razorpay_order_id: String(razorpayOrder.id),
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
+          // 🎯 Force the correct amount here
           amount: Number(amountInPaise),
           payment_status: 1,
           payment_type: 2
         }
       }
     });
-
   } catch (error) {
-    console.error("🔥 SMOKE GUN RECOVERY:", error.message);
-    return res.status(500).json({ status: "false", message: "Purchase initialization failed" });
+    console.error("🔥 Error:", error.message);
+    res.status(500).json({ status: "false", message: "Internal Server Error" });
   }
 };
 
