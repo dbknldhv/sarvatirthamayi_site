@@ -65,14 +65,16 @@ exports.getActiveMemberships = async (req, res) => {
 
 exports.purchaseMembershipCard = async (req, res) => {
   try {
+    // 1. 🛡️ ANTI-CACHE HEADERS: Tells the APK "Do not save this!"
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     const rawId = req.body.membership_card_id || req.body.memberShipId;
     const user = req.user;
-    
-    // 🎯 FIX THE WARNING: Provide a valid numeric ID for the Flutter app
-    // We convert the Mongo Hex ID to a safe Integer to stop the "sql_id" warnings
-    const numericUserId = user.sql_id || parseInt(user._id.toString().substring(0, 8), 16) || 1;
+    const mongoUserId = user._id || user.id;
 
-    // 1. Fetch Plan from DB - This ensures the price is ALWAYS fresh
+    // Fetch the correct plan price from the Database
     const membershipPlan = await Membership.findOne({ 
       $or: [
         { sql_id: parseInt(rawId) || 0 }, 
@@ -80,56 +82,53 @@ exports.purchaseMembershipCard = async (req, res) => {
       ] 
     }).lean();
 
-    if (!membershipPlan) {
-      return res.status(404).json({ status: "false", message: "Plan not found" });
-    }
+    if (!membershipPlan) return res.status(404).json({ status: "false", message: "Plan not found" });
 
     const correctPrice = Number(membershipPlan.price);
     const amountInPaise = Math.round(correctPrice * 100);
 
-    // 2. 🎯 THE CACHE BREAKER: Unique Order ID
-    // We use a clean timestamp receipt to force Razorpay to ignore previous 999 attempts
+    // 2. ⚡ FRESH RAZORPAY ORDER: New ID for every single click
     const razorpayOrder = await razorpay.orders.create({
       amount: amountInPaise,
       currency: "INR",
-      receipt: `rcpt_${Date.now()}`, 
+      // Pure numeric unique receipt to avoid SDK caching
+      receipt: `${Date.now()}`, 
     });
 
     const now = new Date();
     const isoDate = now.toISOString();
 
-    // 3. 🏁 THE RESPONSE (Perfectly matched to your MemberShipPurchaseModel)
-    // 3. 🏁 THE RESPONSE
+    // 3. 🏁 THE RESPONSE: Precisely mapped to the MemberShipPurchaseModel in your APK
     return res.status(200).json({
       status: "true",
-      success: true,
+      // 🎯 THE TRIGGER: Matches Constants.memberShipVerifyPaymentSuccessMsg in strings.dart
       message: "Membership card purchased successfully", 
       data: {
         id: Date.now(), 
-        user_id: numericUserId, 
+        user_id: user.sql_id || 1, 
         membership_card_id: Number(membershipPlan.sql_id) || 1,
         card_status: 0,
         card_status_str: "Pending",
+        // Force strings here to match the Dart 'String? paidAmount'
         paid_amount: String(correctPrice),
         membership_card_amount: String(correctPrice),
         start_date: isoDate.split('T')[0],
         end_date: isoDate.split('T')[0],
-        created_at: isoDate, // Fixed variable name
-        updated_at: isoDate, // Fixed variable name
+        created_at: isoDate,
+        updated_at: isoDate,
         payment: {
           razorpay_order_id: String(razorpayOrder.id),
           razorpay_public_key: String(process.env.RAZORPAY_KEY_ID),
-          amount: Number(amountInPaise),
           payment_status: 1,
           payment_type: 2,
-          payment_date: isoDate // Fixed variable name
+          payment_date: isoDate
         }
       }
     });
 
   } catch (error) {
-    console.error("🔥 Final Sync Error:", error.message);
-    res.status(500).json({ status: "false", message: "Internal Server Error" });
+    console.error("🔥 Final Cache-Break Error:", error.message);
+    res.status(500).json({ status: "false", message: "Gateway Error" });
   }
 };
 
