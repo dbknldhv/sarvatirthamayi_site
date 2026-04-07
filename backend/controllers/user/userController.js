@@ -2,6 +2,7 @@ const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const db = require("../../config/db");
+const { sendSMS } = require("../../utils/smsProvider"); // 🎯 Smart Import
 
 const getFullImageUrl = (path) => {
   if (!path) return "";
@@ -18,25 +19,16 @@ const transporter = nodemailer.createTransport({
     user: process.env.MAIL_USER,
     pass: process.env.MAIL_PASS,
   },
-  tls: {
-    rejectUnauthorized: false,
-  },
+  tls: { rejectUnauthorized: false },
 });
 
 // --- HELPER: ENSURE LEGACY NUMERIC sql_id EXISTS ---
 const ensureUserSqlId = async (user) => {
-  if (user.sql_id && Number(user.sql_id) > 0) {
-    return Number(user.sql_id);
-  }
-
-  const lastUser = await User.findOne({ sql_id: { $ne: null } })
-    .sort({ sql_id: -1 })
-    .select("sql_id");
-
+  if (user.sql_id && Number(user.sql_id) > 0) return Number(user.sql_id);
+  const lastUser = await User.findOne({ sql_id: { $ne: null } }).sort({ sql_id: -1 }).select("sql_id");
   const nextSqlId = Number(lastUser?.sql_id || 0) + 1;
   user.sql_id = nextSqlId;
   await user.save();
-
   return nextSqlId;
 };
 
@@ -46,26 +38,16 @@ exports.signupUser = async (req, res) => {
     const { first_name, last_name, email, mobile_number, password } = req.body;
 
     if (!first_name || !mobile_number || !email || !password) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Required fields are missing.",
-      });
+      return res.status(400).json({ status: "false", success: false, message: "Required fields are missing." });
     }
 
     const cleanMobile = String(mobile_number).replace(/\D/g, "").slice(-10);
     const cleanEmail = String(email).toLowerCase().trim();
 
-    let user = await User.findOne({
-      $or: [{ mobile_number: cleanMobile }, { email: cleanEmail }],
-    });
+    let user = await User.findOne({ $or: [{ mobile_number: cleanMobile }, { email: cleanEmail }] });
 
     if (user && user.is_verified) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "User already exists and is verified.",
-      });
+      return res.status(400).json({ status: "false", success: false, message: "User already exists and is verified." });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -95,6 +77,8 @@ exports.signupUser = async (req, res) => {
 
     await user.save();
 
+    // 🎯 DUAL DISPATCH: Email & SMS
+    // 1. Email
     try {
       await transporter.sendMail({
         from: process.env.MAIL_FROM,
@@ -106,22 +90,17 @@ exports.signupUser = async (req, res) => {
       console.error("❌ SMTP Error:", mailError.message);
     }
 
+    // 2. SMS (Uses Smart Utility)
+    await sendSMS(cleanMobile, otp);
+
     return res.status(200).json({
       status: "true",
       success: true,
-      message: "OTP generated successfully. Check your email.",
-      data: {
-        id: user._id.toString(),
-        userId: user._id.toString(),
-        mobile_number: cleanMobile,
-      },
+      message: "OTP generated successfully. Check your email and mobile.",
+      data: { id: user._id.toString(), userId: user._id.toString(), mobile_number: cleanMobile },
     });
   } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ status: "false", success: false, message: error.message });
   }
 };
 
@@ -129,45 +108,24 @@ exports.signupUser = async (req, res) => {
 exports.verifyOtp = async (req, res) => {
   try {
     const { mobile_number, otp } = req.body;
-
     if (!mobile_number || !otp) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Mobile number and OTP are required.",
-      });
+      return res.status(400).json({ status: "false", success: false, message: "Mobile number and OTP are required." });
     }
 
     const cleanMobile = String(mobile_number).replace(/\D/g, "").slice(-10);
     const user = await User.findOne({ mobile_number: cleanMobile, otp });
 
-    if (!user) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Invalid verification code.",
-      });
-    }
-
+    if (!user) return res.status(400).json({ status: "false", success: false, message: "Invalid code." });
     if (!user.otp_expires || new Date() > user.otp_expires) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Code expired.",
-      });
+      return res.status(400).json({ status: "false", success: false, message: "Code expired." });
     }
 
     user.is_verified = true;
     user.otp = null;
     user.otp_expires = null;
-
     const sqlId = await ensureUserSqlId(user);
 
-    const token = jwt.sign(
-      { id: user._id, sql_id: sqlId },
-      process.env.JWT_SECRET,
-      { expiresIn: "30d" }
-    );
+    const token = jwt.sign({ id: user._id, sql_id: sqlId }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
     return res.status(200).json({
       status: "true",
@@ -179,17 +137,11 @@ exports.verifyOtp = async (req, res) => {
         user_id: String(sqlId),
         mongoId: user._id.toString(),
         accessToken: token,
-        access_token: token,
-        accesstoken: token,
         first_name: user.first_name || "",
       },
     });
   } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ status: "false", success: false, message: error.message });
   }
 };
 
@@ -197,56 +149,66 @@ exports.verifyOtp = async (req, res) => {
 exports.resendOtp = async (req, res) => {
   try {
     const { mobile_number } = req.body;
-
-    if (!mobile_number) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Mobile number is required.",
-      });
-    }
+    if (!mobile_number) return res.status(400).json({ status: "false", message: "Mobile required." });
 
     const cleanMobile = String(mobile_number).replace(/\D/g, "").slice(-10);
     const user = await User.findOne({ mobile_number: cleanMobile });
 
-    if (!user) {
-      return res.status(404).json({
-        status: "false",
-        success: false,
-        message: "User not found",
-      });
-    }
+    if (!user) return res.status(404).json({ status: "false", message: "User not found" });
 
     const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
     user.otp = newOtp;
     user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    try {
-      const recipientEmail = user.email || process.env.MAIL_USER;
-      await transporter.sendMail({
-        from: process.env.MAIL_FROM,
-        to: recipientEmail,
-        subject: "New Verification Code",
-        html: `<h1>${newOtp}</h1>`,
-      });
-    } catch (err) {
-      console.error("Resend Mail Error:", err.message);
-    }
+    // 🎯 DUAL DISPATCH
+    await transporter.sendMail({
+      from: process.env.MAIL_FROM,
+      to: user.email,
+      subject: "New Verification Code",
+      html: `<h1>${newOtp}</h1>`,
+    }).catch(err => console.error("Mail Error:", err.message));
 
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "New code sent.",
-    });
+    await sendSMS(cleanMobile, newOtp);
+
+    return res.status(200).json({ status: "true", success: true, message: "New code sent." });
   } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ status: "false", message: error.message });
   }
 };
+
+// --- FORGOT PASSWORD ---
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ status: "false", message: "Email required." });
+
+    const cleanEmail = String(email).toLowerCase().trim();
+    const user = await User.findOne({ email: cleanEmail });
+
+    if (!user) return res.status(404).json({ status: "false", message: "Email not found." });
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    user.otp = otp;
+    user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
+
+    // 🎯 DUAL DISPATCH
+    await transporter.sendMail({
+      from: process.env.MAIL_FROM,
+      to: user.email,
+      subject: "Password Reset Code",
+      html: `<h1>${otp}</h1>`,
+    }).catch(err => console.error("Mail Error:", err.message));
+
+    await sendSMS(user.mobile_number, otp);
+
+    return res.status(200).json({ status: "true", success: true, message: "Code sent to email and mobile." });
+  } catch (error) {
+    return res.status(500).json({ status: "false", message: error.message });
+  }
+};
+
 
 // --- LOGIN ---
 exports.loginUser = async (req, res) => {
@@ -490,55 +452,7 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
-// --- PASSWORD RECOVERY ---
-exports.forgotPassword = async (req, res) => {
-  try {
-    const { email } = req.body;
 
-    if (!email) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Email is required.",
-      });
-    }
-
-    const cleanEmail = String(email).toLowerCase().trim();
-    const user = await User.findOne({ email: cleanEmail });
-
-    if (!user) {
-      return res.status(404).json({
-        status: "false",
-        success: false,
-        message: "Email not found.",
-      });
-    }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    user.otp = otp;
-    user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
-    await user.save();
-
-    await transporter.sendMail({
-      from: process.env.MAIL_FROM,
-      to: user.email,
-      subject: "Password Reset Code",
-      html: `<h1>${otp}</h1>`,
-    });
-
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "Code sent.",
-    });
-  } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
-  }
-};
 
 exports.resetPassword = async (req, res) => {
   try {
