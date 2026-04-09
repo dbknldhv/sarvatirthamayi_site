@@ -157,8 +157,8 @@ const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, () => {
     console.log(`
     ************************************************
-    🚀 Server Live: http://localhost:${PORT}
-    🛠️  Mode:        ${isProduction ? 'Production' : 'Development'}
+    🚀 Server Live: ${BASE_URL}:${PORT}
+    🛠️  Mode:        ${process.env.NODE_ENV || 'Development'}
     ************************************************
     `);
 });
