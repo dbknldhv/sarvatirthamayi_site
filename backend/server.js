@@ -154,6 +154,9 @@ mongoose
     });
 // --- 10. SERVER START ---
 const PORT = process.env.PORT || 5000;
+
+const BASE_URL = process.env.BASE_URL || 'http://localhost';
+
 const server = app.listen(PORT, () => {
     console.log(`
     ************************************************
