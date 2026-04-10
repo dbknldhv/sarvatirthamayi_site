@@ -188,38 +188,89 @@ exports.resendOtp = async (req, res) => {
   }
 };
 
-// --- FORGOT PASSWORD ---
+/**
+ * FORGOT PASSWORD - Updated for Flutter String ID Compatibility
+ */
 exports.forgotPassword = async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ status: "false", message: "Email required." });
+    try {
+        const { email, mobile_number } = req.body;
+        let query = {};
 
-    const cleanEmail = String(email).toLowerCase().trim();
-    const user = await User.findOne({ email: cleanEmail });
+        // 1. Handle Dynamic Search (Email or Mobile)
+        if (email) {
+            query = { email: email.toLowerCase().trim() };
+        } else if (mobile_number) {
+            // Cleans +91 or spaces and takes last 10 digits
+            const cleanMobile = String(mobile_number).replace(/\D/g, "").slice(-10);
+            query = { mobile_number: new RegExp(cleanMobile + '$') }; // Matches suffix
+        } else {
+            return res.status(400).json({ status: "false", message: "Email or Mobile is required." });
+        }
 
-    if (!user) return res.status(404).json({ status: "false", message: "Email not found." });
+        const user = await User.findOne(query);
+        
+        if (!user) {
+            return res.status(404).json({ 
+                status: "false", 
+                success: false, 
+                message: "No account found with this identifier." 
+            });
+        }
 
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    user.otp = otp;
-    user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
-    await user.save();
+        // 2. OTP Generation
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        user.otp = otp;
+        user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
+        await user.save();
 
-    // 🎯 DUAL DISPATCH
-    await transporter.sendMail({
-      from: process.env.MAIL_FROM,
-      to: user.email,
-      subject: "Password Reset Code",
-      html: `<h1>${otp}</h1>`,
-    }).catch(err => console.error("Mail Error:", err.message));
+        // 3. Send Email
+        try {
+            await transporter.sendMail({
+                from: process.env.MAIL_FROM,
+                to: user.email,
+                subject: "Reset Password OTP",
+                html: `<h1>Your Reset Code: ${otp}</h1>`
+            });
+        } catch (mailErr) {
+            console.log(`❌ Mailer Error. Use this OTP: ${otp}`);
+        }
 
-    await sendSMS(user.mobile_number, otp);
-
-    return res.status(200).json({ status: "true", success: true, message: "Code sent to email and mobile." });
-  } catch (error) {
-    return res.status(500).json({ status: "false", message: error.message });
-  }
+        // 4. Response matches Flutter Model (String ID)
+        res.status(200).json({ 
+            status: "true", 
+            success: true, 
+            message: "OTP sent successfully",
+            data: { 
+                id: user._id.toString(), // 🎯 Sending String to match Flutter Model
+                first_name: user.first_name || "",
+                mobile_number: user.mobile_number 
+            } 
+        });
+    } catch (error) { 
+        res.status(500).json({ status: "false", success: false, message: error.message }); 
+    }
 };
 
+exports.forgotVerifyOtp = async (req, res) => {
+    try {
+        const { user_id, otp } = req.body;
+        
+        const user = await User.findById(user_id);
+
+        if (!user || user.otp !== otp || user.otp_expires < Date.now()) {
+            return res.status(400).json({ status: "false", message: "Invalid or expired OTP" });
+        }
+
+        res.status(200).json({ 
+            status: "true", 
+            success: true, 
+            message: "OTP Verified",
+            data: { otp: otp } // Return OTP to pass to Reset Password screen
+        });
+    } catch (error) { 
+        res.status(500).json({ status: "false", message: error.message }); 
+    }
+};
 
 // --- LOGIN ---
 exports.loginUser = async (req, res) => {
