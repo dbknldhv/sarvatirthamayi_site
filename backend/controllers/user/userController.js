@@ -62,6 +62,9 @@ exports.signupUser = async (req, res) => {
       user.email = cleanEmail;
       user.mobile_number = cleanMobile;
     } else {
+
+      const newSqlId = Math.floor(100000 + Math.random() * 900000);
+
       user = new User({
         first_name,
         last_name: last_name || "",
@@ -72,6 +75,7 @@ exports.signupUser = async (req, res) => {
         is_verified: false,
         otp,
         otp_expires: otpExpires,
+        sql_id: newSqlId,
       });
     }
 
@@ -90,14 +94,21 @@ exports.signupUser = async (req, res) => {
       console.error("❌ SMTP Error:", mailError.message);
     }
 
-    // 2. SMS (Uses Smart Utility)
-    await sendSMS(cleanMobile, otp);
+    try {
+        await sendSMS(cleanMobile, otp);
+    } catch (smsError) {
+        console.error("❌ SMS Error:", smsError.message);
+    }
 
     return res.status(200).json({
       status: "true",
       success: true,
       message: "OTP generated successfully. Check your email and mobile.",
-      data: { id: user._id.toString(), userId: user._id.toString(), mobile_number: cleanMobile },
+      data: { id: user._id.toString(),
+         userId: user._id.toString(),
+         sql_id: user.sql_id,
+          mobile_number: cleanMobile 
+        },
     });
   } catch (error) {
     return res.status(500).json({ status: "false", success: false, message: error.message });
