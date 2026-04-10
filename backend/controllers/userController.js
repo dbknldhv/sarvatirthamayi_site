@@ -245,6 +245,100 @@ exports.deleteUser = async (req, res) => {
     } catch (error) { res.status(500).json({ success: false, message: "Delete failed" }); }
 };
 
+exports.forgotPassword = async (req, res) => {
+    try {
+        const { mobile_number, email } = req.body;
+        
+        // 1. Clean the input (Handle +91 from Flutter)
+        let query = {};
+        if (mobile_number) {
+            const cleanMobile = String(mobile_number).replace(/\D/g, "").slice(-10);
+            query = { mobile_number: cleanMobile };
+        } else if (email) {
+            query = { email: email.toLowerCase().trim() };
+        } else {
+            return res.status(400).json({ status: "false", message: "Input required." });
+        }
+
+        const user = await User.findOne(query);
+        if (!user) return res.status(404).json({ status: "false", message: "User not found." });
+
+        // 2. Generate and Save OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        user.otp = otp;
+        user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
+        await user.save();
+
+        // 3. Send via Email (Currently using your verified Sarvatirthamayi Gmail)
+        try {
+            await transporter.sendMail({
+                from: process.env.MAIL_FROM,
+                to: user.email,
+                subject: "Reset Password OTP",
+                html: `<h1>Your Reset Code: ${otp}</h1>`
+            });
+            console.log(`✅ Reset OTP sent to: ${user.email}`);
+        } catch (err) {
+            console.log(`❌ Mail failed. USE THIS OTP FOR TESTING: ${otp}`);
+        }
+
+        // 4. Flutter Expects 'data.id' as the user identifier for the next screen
+        res.status(200).json({ 
+            status: "true", 
+            success: true, 
+            message: "OTP sent successfully.",
+            data: { 
+                id: user.sql_id || user._id.toString(), // 🎯 Matches state.forgotPasswordModel?.data?.id
+                mobile_number: user.mobile_number 
+            } 
+        });
+    } catch (error) { 
+        res.status(500).json({ status: "false", success: false, message: error.message }); 
+    }
+};
+
+
+/**
+ * RESET PASSWORD
+ * Matches Flutter: ResetPassResponseEvent(userId, otp, password, confirmPassword)
+ */
+exports.resetPassword = async (req, res) => {
+    try {
+        const { user_id, password, confirm_password, otp } = req.body;
+
+        // 1. Validation
+        if (password !== confirm_password) {
+            return res.status(400).json({ status: "false", message: "Passwords do not match." });
+        }
+
+        // 2. Find user (Supports C: Drive Integer ID or Mongo String ID)
+        const user = await User.findOne({
+            $or: [
+                { sql_id: !isNaN(user_id) ? Number(user_id) : -1 },
+                { _id: user_id.length === 24 ? user_id : null }
+            ]
+        });
+
+        if (!user || user.otp !== otp || user.otp_expires < Date.now()) {
+            return res.status(400).json({ status: "false", message: "Invalid or Expired OTP." });
+        }
+
+        // 3. Update Password (User.js pre-save hook handles hashing automatically)
+        user.password = password;
+        user.otp = undefined; // Clear OTP after success
+        await user.save();
+
+        res.status(200).json({ 
+            status: "true", 
+            success: true, 
+            message: "Password reset successful." 
+        });
+    } catch (error) { 
+        res.status(500).json({ status: "false", message: error.message }); 
+    }
+};
+
+
 // --- FINAL EXPORTS WITH ALIASES TO STOP THE CRASH ---
 module.exports = {
     signupUser: exports.signupUser,
@@ -259,6 +353,8 @@ module.exports = {
     getMe: exports.getProfile,      // 🎯 Common Line 8 Alias
     getAllUsers: exports.getAllUsers,
     getUserById: exports.getUserById,
+    forgotPassword: exports.forgotPassword, // 🎯 Added
+    resetPassword: exports.resetPassword,   // 🎯 Added
     updateUser: exports.updateUser,
     deleteUser: exports.deleteUser
 };
