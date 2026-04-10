@@ -52,26 +52,25 @@ const generateAccessToken = (user) =>
  * Even if email fails, the OTP is printed to the terminal for development.
  */
 const sendOtpEmail = async (email, otp, subject = "Your OTP for STM Club") => {
-    console.log("\n-----------------------------------------");
-    console.log(`🚀 ATTEMPTING MAIL: To ${email} | OTP: ${otp}`);
-    console.log("-----------------------------------------\n");
+    console.log(`🚀 DEBUG: Attempting to send to ${email}`);
     
     try {
-        await transporter.sendMail({
+        const info = await transporter.sendMail({
             from: process.env.MAIL_FROM,
             to: email,
-            subject,
-            text: `Your STM Club verification code is: ${otp}`,
-            html: `<div style="font-family: Arial; padding: 20px; border: 1px solid #eee;">
-                    <h2>STM Club Verification</h2>
-                    <p>Your OTP code is: <b style="font-size: 24px; color: #ff5722;">${otp}</b></p>
-                    <p>This code is valid for 10 minutes.</p>
-                   </div>`,
+            subject: subject,
+            text: `Your OTP is ${otp}`,
         });
-        console.log(`✅ SUCCESS: Email delivered to ${email}`);
+        console.log("✅ MAIL SENT SUCCESSFULLY:", info.response);
     } catch (error) {
-        console.error("❌ NODEMAILER FAILURE:", error.message);
-        console.log(`👉 DEV WORKAROUND: Use OTP ${otp} to continue testing.`);
+        // 🎯 THIS LINE IS THE KEY. It will tell us WHY it failed.
+        console.error("❌ PRODUCTION BLOCKER ERROR:", error.code, error.message);
+        
+        if (error.code === 'EAUTH') {
+            console.log("👉 FIX: Your App Password or Email is wrong in .env");
+        } else if (error.code === 'ETIMEDOUT') {
+            console.log("👉 FIX: Your VM Firewall is blocking the return traffic.");
+        }
     }
 };
 
