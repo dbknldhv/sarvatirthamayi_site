@@ -8,20 +8,13 @@ const nodemailer = require("nodemailer");
  */
 const transporter = nodemailer.createTransport({
     service: "gmail",
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true, 
     auth: {
         user: process.env.MAIL_USER,
-        pass: process.env.MAIL_PASS,
+        pass: process.env.MAIL_PASS, // Ensure NO SPACES in .env
     },
-    // 🛡️ CRITICAL FOR VMs: Force IPv4 to bypass common IPv6 SMTP blocks
-    family: 4, 
-    connectionTimeout: 15000, 
-    greetingTimeout: 15000,
-    socketTimeout: 15000,
-    tls: { 
-        rejectUnauthorized: false 
+    family: 4, // 🛡️ Forces IPv4 - CRITICAL
+    tls: {
+        rejectUnauthorized: false // Bypasses SSL certificate issues on some VMs
     }
 });
 
