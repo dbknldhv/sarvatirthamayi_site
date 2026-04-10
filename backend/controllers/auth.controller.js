@@ -7,14 +7,20 @@ const nodemailer = require("nodemailer");
  * Optimized for VM environments with IPv4 force and connection timeouts.
  */
 const transporter = nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true, // true for 465, false for other ports
     auth: {
         user: process.env.MAIL_USER,
-        pass: process.env.MAIL_PASS, // Ensure NO SPACES in .env
+        pass: process.env.MAIL_PASS, 
     },
-    family: 4, // 🛡️ Forces IPv4 - CRITICAL
+    // 🛡️ THE BOSS FIXES:
+    family: 4,               // Forces IPv4 (prevents VM IPv6 timeouts)
+    socketTimeout: 30000,    // Give it 30 seconds to breathe
+    greetingTimeout: 30000,
     tls: {
-        rejectUnauthorized: false // Bypasses SSL certificate issues on some VMs
+        rejectUnauthorized: false,
+        servername: 'smtp.gmail.com' // Forces correct SSL handshake
     }
 });
 
