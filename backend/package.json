@@ -31,7 +31,8 @@
     "pdfkit": "^0.17.2",
     "razorpay": "^2.9.6",
     "react-icons": "^5.5.0",
-    "react-scroll": "^1.9.3"
+    "react-scroll": "^1.9.3",
+    "twilio": "^5.13.1"
   },
   "devDependencies": {
     "@faker-js/faker": "^10.2.0",
