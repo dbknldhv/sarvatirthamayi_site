@@ -52,28 +52,23 @@ const generateAccessToken = (user) =>
  * Even if email fails, the OTP is printed to the terminal for development.
  */
 const sendOtpEmail = async (email, otp, subject = "Your OTP for STM Club") => {
-    console.log(`🚀 DEBUG: Attempting to send to ${email}`);
+    console.log(`🚀 ATTEMPTING MAIL: To ${email} | OTP: ${otp}`);
     
     try {
         const info = await transporter.sendMail({
-            from: process.env.MAIL_FROM,
+            from: `STM Club <${process.env.MAIL_FROM}>`,
             to: email,
             subject: subject,
-            text: `Your OTP is ${otp}`,
+            text: `Your STM Club verification code is: ${otp}`,
+            html: `<b>Your STM Club verification code is: ${otp}</b><p>Valid for 10 minutes.</p>`,
         });
-        console.log("✅ MAIL SENT SUCCESSFULLY:", info.response);
+        console.log("✅ MAIL SENT SUCCESSFULLY:", info.messageId);
+        return true;
     } catch (error) {
-        // 🎯 THIS LINE IS THE KEY. It will tell us WHY it failed.
-        console.error("❌ PRODUCTION BLOCKER ERROR:", error.code, error.message);
-        
-        if (error.code === 'EAUTH') {
-            console.log("👉 FIX: Your App Password or Email is wrong in .env");
-        } else if (error.code === 'ETIMEDOUT') {
-            console.log("👉 FIX: Your VM Firewall is blocking the return traffic.");
-        }
+        console.error("❌ NODEMAILER FAILURE:", error.code, error.message);
+        return false;
     }
 };
-
 const buildAuthUserResponse = (user, token = "") => ({
     id: user._id.toString(),
     user_id: user._id.toString(),
@@ -94,15 +89,7 @@ const buildAuthUserResponse = (user, token = "") => ({
 
 const handleDuplicateKeyError = (error, res) => {
     if (error?.code !== 11000) return false;
-    if (error.keyPattern?.email) {
-        res.status(400).json({ status: "false", success: false, message: "Email already registered." });
-        return true;
-    }
-    if (error.keyPattern?.mobile_number) {
-        res.status(400).json({ status: "false", success: false, message: "Mobile number already registered." });
-        return true;
-    }
-    res.status(400).json({ status: "false", success: false, message: "Duplicate record found." });
+    res.status(400).json({ status: "false", success: false, message: "Email or Mobile already exists." });
     return true;
 };
 
@@ -110,14 +97,12 @@ const handleDuplicateKeyError = (error, res) => {
 
 exports.signUp = async (req, res) => {
     try {
-        const body = req.body || {};
-        const fName = body.first_name || body.firstName || body.name || "";
-        const emailAddr = normalizeEmail(body.email);
-        const cleanMobile = normalizeMobile(body.mobile_number || body.mobileNo);
-        const pwd = body.password || "";
+        const { email, password, first_name } = req.body;
+        const emailAddr = normalizeEmail(email);
+        const cleanMobile = normalizeMobile(req.body.mobile_number || req.body.mobileNo);
 
-        if (!fName || !emailAddr || !cleanMobile || !pwd) {
-            return res.status(400).json({ status: "false", message: "Missing required fields." });
+        if (!first_name || !emailAddr || !cleanMobile || !password) {
+            return res.status(400).json({ status: "false", message: "Missing fields." });
         }
 
         let user = await User.findOne({ $or: [{ email: emailAddr }, { mobile_number: cleanMobile }] });
@@ -125,38 +110,26 @@ exports.signUp = async (req, res) => {
         const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
 
         if (user) {
-            user.first_name = fName;
-            if (pwd) user.password = pwd; 
             user.otp = otp;
             user.otp_expires = otpExpires;
-            user.is_verified = false;
             await user.save();
         } else {
             user = await User.create({
-                first_name: fName,
-                email: emailAddr,
-                mobile_number: cleanMobile,
-                password: pwd,
-                otp: otp,
-                otp_expires: otpExpires,
-                is_verified: false,
-                user_type: 3
+                first_name, email: emailAddr, mobile_number: cleanMobile,
+                password, otp, otp_expires: otpExpires, is_verified: false, user_type: 3
             });
         }
 
-        // Send OTP in background
-        sendOtpEmail(emailAddr, otp, "Verify your STM Club Account");
+        // 🎯 AWAIT added so we know if it sent
+        await sendOtpEmail(emailAddr, otp, "Verify your STM Club Account");
 
         return res.status(200).json({
-            status: "true",
-            success: true,
-            message: "OTP sent successfully",
-            data: { id: user._id.toString(), userId: user._id.toString(), mobile_number: user.mobile_number }
+            status: "true", success: true, message: "OTP sent successfully",
+            data: { id: user._id.toString(), userId: user._id.toString() }
         });
     } catch (error) {
         if (handleDuplicateKeyError(error, res)) return;
-        console.error("SIGNUP ERROR:", error);
-        return res.status(500).json({ status: "false", message: "Internal Server Error" });
+        res.status(500).json({ status: "false", message: "Signup Error" });
     }
 };
 
@@ -220,7 +193,7 @@ exports.forgotPassword = async (req, res) => {
 
         let user = email ? await User.findOne({ email }) : await User.findOne({ mobile_number: mobile });
 
-        if (!user) return res.status(404).json({ status: "false", success: false, message: "No account found." });
+        if (!user) return res.status(404).json({ status: "false", message: "No account found." });
 
         const otp = generateOtp();
         user.otp = otp;
@@ -228,15 +201,13 @@ exports.forgotPassword = async (req, res) => {
         await user.save();
 
         if (user.email) {
-            sendOtpEmail(user.email, otp, "Password Reset OTP - STM Club");
+            await sendOtpEmail(user.email, otp, "Password Reset OTP - STM Club");
         } else {
-            console.log(`👉 TERMINAL FORGOT OTP FOR ${user.mobile_number}: ${otp}`);
+            console.log(`👉 TERMINAL OTP FOR MOBILE ${user.mobile_number}: ${otp}`);
         }
 
         return res.status(200).json({
-            status: "true",
-            success: true,
-            message: "OTP sent successfully",
+            status: "true", success: true, message: "OTP sent successfully",
             data: { id: user._id.toString(), userId: user._id.toString() }
         });
     } catch (error) {
