@@ -52,7 +52,7 @@ const generateAccessToken = (user) =>
  * Even if email fails, the OTP is printed to the terminal for development.
  */
 const sendOtpEmail = async (email, otp, subject = "Your OTP for STM Club") => {
-    console.log(`🚀 ATTEMPTING MAIL: To ${email} | OTP: ${otp}`);
+    //console.log(`🚀 ATTEMPTING MAIL: To ${email} | OTP: ${otp}`);
     
     try {
         const info = await transporter.sendMail({
