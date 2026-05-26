@@ -42,7 +42,7 @@ export default function Navbar() {
 
   const handleLogout = () => {
     logout();
-    navigate("/login");
+    navigate("/user/login");
   };
 
   // Helper to get initials safely
@@ -166,7 +166,7 @@ export default function Navbar() {
                 />
               </div>
             ) : (
-              <RouterLink to="/login" className="px-8 py-3 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-[0.2em] hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 transition-all hover:-translate-y-0.5">
+              <RouterLink to="/user/login" className="px-8 py-3 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-[0.2em] hover:bg-indigo-700 shadow-xl shadow-indigo-600/20 transition-all hover:-translate-y-0.5">
                 Login
               </RouterLink>
             )}

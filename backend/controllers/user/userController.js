@@ -2,12 +2,18 @@ const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
 const db = require("../../config/db");
-const { sendSMS } = require("../../utils/smsProvider"); // 🎯 Smart Import
+const { sendSMS } = require("../../utils/smsProvider"); 
 
 const getFullImageUrl = (path) => {
   if (!path) return "";
   if (path.startsWith("http")) return path;
-  return `https://api.sarvatirthamayi.com/${path.replace(/\\/g, "/")}`;
+  
+  // Use localhost for local testing. Change back to production URL when deploying.
+  const baseUrl = process.env.NODE_ENV === 'production' 
+    ? "https://api.sarvatirthamayi.com" 
+    : "http://localhost:5000"; // <-- Change 5000 to whatever port your backend uses
+
+  return `${baseUrl}/${path.replace(/\\/g, "/")}`;
 };
 
 // --- EMAIL CONFIGURATION ---
@@ -81,7 +87,6 @@ exports.signupUser = async (req, res) => {
 
     await user.save();
 
-    // 🎯 DUAL DISPATCH: Email & SMS
     // 1. Email
     try {
       await transporter.sendMail({
@@ -172,7 +177,6 @@ exports.resendOtp = async (req, res) => {
     user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    // 🎯 DUAL DISPATCH
     await transporter.sendMail({
       from: process.env.MAIL_FROM,
       to: user.email,
@@ -188,21 +192,16 @@ exports.resendOtp = async (req, res) => {
   }
 };
 
-/**
- * FORGOT PASSWORD - Updated for Flutter String ID Compatibility
- */
 exports.forgotPassword = async (req, res) => {
     try {
         const { email, mobile_number } = req.body;
         let query = {};
 
-        // 1. Handle Dynamic Search (Email or Mobile)
         if (email) {
             query = { email: email.toLowerCase().trim() };
         } else if (mobile_number) {
-            // Cleans +91 or spaces and takes last 10 digits
             const cleanMobile = String(mobile_number).replace(/\D/g, "").slice(-10);
-            query = { mobile_number: new RegExp(cleanMobile + '$') }; // Matches suffix
+            query = { mobile_number: new RegExp(cleanMobile + '$') }; 
         } else {
             return res.status(400).json({ status: "false", message: "Email or Mobile is required." });
         }
@@ -217,13 +216,11 @@ exports.forgotPassword = async (req, res) => {
             });
         }
 
-        // 2. OTP Generation
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         user.otp = otp;
         user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
         await user.save();
 
-        // 3. Send Email
         try {
             await transporter.sendMail({
                 from: process.env.MAIL_FROM,
@@ -235,13 +232,12 @@ exports.forgotPassword = async (req, res) => {
             console.log(`❌ Mailer Error. Use this OTP: ${otp}`);
         }
 
-        // 4. Response matches Flutter Model (String ID)
         res.status(200).json({ 
             status: "true", 
             success: true, 
             message: "OTP sent successfully",
             data: { 
-                id: user._id.toString(), // 🎯 Sending String to match Flutter Model
+                id: user._id.toString(), 
                 first_name: user.first_name || "",
                 mobile_number: user.mobile_number 
             } 
@@ -265,7 +261,7 @@ exports.forgotVerifyOtp = async (req, res) => {
             status: "true", 
             success: true, 
             message: "OTP Verified",
-            data: { otp: otp } // Return OTP to pass to Reset Password screen
+            data: { otp: otp } 
         });
     } catch (error) { 
         res.status(500).json({ status: "false", message: error.message }); 
@@ -411,9 +407,8 @@ exports.getProfile = async (req, res) => {
       gender: user.gender !== undefined ? String(user.gender) : "1",
       user_type: user.user_type !== undefined ? String(user.user_type) : "3",
       profile_picture: user.profile_picture ? getFullImageUrl(user.profile_picture) : "",
-      profile_picture_thumb: user.profile_picture
-        ? getFullImageUrl(user.profile_picture)
-        : "",
+      profile_picture_thumb: user.profile_picture ? getFullImageUrl(user.profile_picture) : "",
+      banner_image: user.banner_image ? getFullImageUrl(user.banner_image) : "" // 🎯 Added Banner to response
     };
 
     return res.status(200).json({
@@ -434,6 +429,8 @@ exports.getProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
+    // 👉 ADD THIS LINE TO DEBUG:
+    console.log("FILES RECEIVED BY BACKEND:", req.files);
     const {
       first_name,
       last_name,
@@ -463,14 +460,23 @@ exports.updateProfile = async (req, res) => {
       updateData.name = `${first} ${last}`.trim();
     }
 
-    if (req.files && req.files["profile_picture"]) {
-      updateData.profile_picture = req.files["profile_picture"][0].path;
+    // 🎯 THE FIX: Handle BOTH profile_picture AND banner_image properly here
+    if (req.files) {
+        if (req.files.profile_picture && req.files.profile_picture.length > 0) {
+            updateData.profile_picture = req.files.profile_picture[0].path;
+        }
+        if (req.files.banner_image && req.files.banner_image.length > 0) {
+            updateData.banner_image = req.files.banner_image[0].path;
+        }
+    } else if (req.file) {
+        updateData.profile_picture = req.file.path;
     }
 
+    // 🎯 THE FIX: Replaced { new: true } with { returnDocument: 'after' }
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateData },
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     ).lean();
 
     if (!updatedUser) {
@@ -491,12 +497,9 @@ exports.updateProfile = async (req, res) => {
       date_of_birth: updatedUser.date_of_birth || "",
       gender: String(updatedUser.gender || "1"),
       user_type: String(updatedUser.user_type || "3"),
-      profile_picture: updatedUser.profile_picture
-        ? getFullImageUrl(updatedUser.profile_picture)
-        : "",
-      profile_picture_thumb: updatedUser.profile_picture
-        ? getFullImageUrl(updatedUser.profile_picture)
-        : "",
+      profile_picture: updatedUser.profile_picture ? getFullImageUrl(updatedUser.profile_picture) : "",
+      profile_picture_thumb: updatedUser.profile_picture ? getFullImageUrl(updatedUser.profile_picture) : "",
+      banner_image: updatedUser.banner_image ? getFullImageUrl(updatedUser.banner_image) : "" // 🎯 Ensure banner updates in React State
     };
 
     return res.status(200).json({
@@ -513,8 +516,6 @@ exports.updateProfile = async (req, res) => {
     });
   }
 };
-
-
 
 exports.resetPassword = async (req, res) => {
   try {
@@ -587,10 +588,21 @@ exports.getUserById = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
   try {
+    const updateData = { ...req.body };
+
+    // 🎯 THE FIX: Handle Admin image uploads too
+    if (req.files) {
+        if (req.files.profile_picture) updateData.profile_picture = req.files.profile_picture[0].path;
+        if (req.files.banner_image) updateData.banner_image = req.files.banner_image[0].path;
+    } else if (req.file) {
+        updateData.profile_picture = req.file.path;
+    }
+
+    // 🎯 THE FIX: Replaced { new: true } with { returnDocument: 'after' } and passed updateData
     const updatedUser = await User.findByIdAndUpdate(
       req.params.id,
-      { $set: req.body },
-      { new: true, runValidators: true }
+      { $set: updateData },
+      { returnDocument: 'after', runValidators: true }
     ).select("-password");
 
     return res.status(200).json({

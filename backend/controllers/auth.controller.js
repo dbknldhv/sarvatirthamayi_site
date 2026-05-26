@@ -270,29 +270,56 @@ exports.resetPassword = async (req, res) => {
 
 exports.login = async (req, res) => {
     try {
+        // 1. Extract identifiers (Supports both Web 'email' and Flutter 'mobile' keys)
+        const email = normalizeEmail(req.body.email);
         const mobile = normalizeMobile(req.body.mobile || req.body.mobile_number || req.body.mobileNo);
         const password = req.body.password || "";
 
-        const user = await User.findOne({ mobile_number: mobile });
+        // 2. Multi-Identifier Search
+        // This looks for EITHER the email OR the mobile number in your Database
+        const user = await User.findOne({
+            $or: [
+                { email: email },
+                { mobile_number: mobile }
+            ]
+        });
 
-        if (!user) return res.status(401).json({ status: "false", message: "User not found." });
-        if (!user.is_verified) return res.status(401).json({ status: "false", message: "Account unverified." });
+        // 3. Validation Checks
+        if (!user) {
+            return res.status(401).json({ status: "false", message: "User not found." });
+        }
 
+        if (!user.is_verified) {
+            return res.status(401).json({ status: "false", message: "Account unverified." });
+        }
+
+        // 4. Password Verification
         const isMatch = await user.matchPassword(password);
-        if (!isMatch) return res.status(401).json({ status: "false", message: "Invalid password." });
+        if (!isMatch) {
+            return res.status(401).json({ status: "false", message: "Invalid password." });
+        }
 
+        // 5. Success Response (Uses your existing helpers to stay consistent with Flutter)
         const token = generateAccessToken(user);
+        res.cookie("access_token", token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+            maxAge: 30 * 24 * 60 * 60 * 1000,
+            path: "/"
+        });
         return res.status(200).json({
             status: "true",
             success: true,
             message: "Login Successful",
             data: buildAuthUserResponse(user, token)
         });
+
     } catch (error) {
+        console.error("Login Error:", error);
         res.status(500).json({ status: "false", message: "Login error" });
     }
 };
-
 exports.adminSignup = async (req, res) => {
     try {
         const { first_name, last_name, email, password, user_type, mobile_number, temple_id } = req.body;
@@ -342,12 +369,24 @@ exports.checkAuth = async (req, res) => {
 
 exports.logout = async (req, res) => {
     try {
-        const userId = req.body.user_id || req.body.userId || req.body.id;
-        res.clearCookie("accessToken");
-        if (userId) await User.updateOne({ _id: userId }, { $unset: { refreshToken: 1 } });
-        return res.status(200).json({ status: "true", success: true, message: "Logged out" });
+        res.clearCookie("access_token", {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+            path: "/"
+        });
+
+        return res.status(200).json({
+            status: "true",
+            success: true,
+            message: "Logged out"
+        });
     } catch (error) {
-        return res.status(500).json({ status: "false", message: "Logout error" });
+        return res.status(500).json({
+            status: "false",
+            success: false,
+            message: "Logout error"
+        });
     }
 };
 

@@ -27,10 +27,10 @@ export default function LandingPage() {
   useEffect(() => {
     const fetchPlans = async () => {
       try {
-        // Updated from /admin/... to /user/... to resolve 403 Forbidden
         const res = await api.get("/user/membership-plans/active");
         if (res.data.success) {
-          setPlans(res.data.data);
+          // 🎯 THE FIX: Added .data to dig into the pagination object
+          setPlans(res.data.data?.data || []);
         }
       } catch (err) {
         console.error("LandingPage: Failed to fetch plans", err);
@@ -49,7 +49,21 @@ export default function LandingPage() {
     }
   }, [plans]);
 
-  const handleSTMClubClick = () => navigate("/user/stm-club");
+  // 🎯 THE FIX: Flawless Navigation with the "Return Ticket"
+  const handleSTMClubClick = (e) => {
+    e.preventDefault(); 
+    
+    // Instantly check for an active session to prevent UI lag
+    const activeToken = localStorage.getItem("token");
+
+    if (activeToken) {
+      // User is logged in, send them straight to the club
+      navigate("/user/stm-club");
+    } else {
+      // User is logged out, send to login but attach the Return Ticket
+      navigate("/user/login", { state: { from: "/user/stm-club" } });
+    }
+  };
 
   return (
     <div className={`transition-colors duration-700 overflow-x-hidden ${dark ? 'bg-slate-950 text-white' : 'bg-white text-slate-900'}`}>
@@ -105,104 +119,184 @@ export default function LandingPage() {
       </Element>
 
       {/* --- ABOUT SUMMARY SECTION --- */}
-      <Element name="about-summary" className="py-32 px-6 bg-slate-50 dark:bg-slate-900/40">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
+      <Element name="about-summary" className="py-32 px-6 bg-slate-50 dark:bg-slate-900/40 overflow-hidden">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16 lg:gap-24 items-center">
+          
+          {/* Left Column: Text & Features */}
           <motion.div 
-            initial={{ opacity: 0, x: -40 }} 
-            whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
+            initial={{ opacity: 0, y: 20 }} 
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+            viewport={{ once: true, margin: "-100px" }}
+            className="space-y-10"
           >
-            <SectionHeading title="About Us" /> 
-            <SectionDivider />
-            <div className="space-y-8 text-lg text-slate-600 dark:text-slate-400">
-              <p className="leading-relaxed font-medium">
-                Sarvatirthamayi is more than a platform; it's a movement to reconnect the modern world with ancient spiritual heritage through transparent digital connectivity.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {["Temple Culture", "Digital Connectivity", "Heritage Security", "Vedic Authenticity"].map((item, i) => (
-                  <div key={i} className="flex items-center gap-3 p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm transition-transform hover:scale-105">
-                    <CheckCircle2 className="text-emerald-500 shrink-0" size={20} />
-                    <span className="font-bold text-sm text-slate-800 dark:text-slate-200">{item}</span>
+            <div>
+              <SectionHeading title="About Us" /> 
+              <SectionDivider />
+            </div>
+            
+            <p className="text-xl leading-relaxed text-slate-600 dark:text-slate-300 font-light">
+              <strong className="font-bold text-indigo-700 dark:text-amber-400">Sarvatirthamayi</strong> is more than a platform; it's a movement to reconnect the modern world with ancient spiritual heritage through transparent, secure digital connectivity.
+            </p>
+
+            {/* Upgraded Feature Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {["Temple Culture", "Digital Connectivity", "Heritage Security", "Vedic Authenticity"].map((item, i) => (
+                <div 
+                  key={i} 
+                  className="group flex items-center gap-4 p-4 bg-white/80 dark:bg-slate-800/50 backdrop-blur-sm rounded-2xl border border-slate-200/60 dark:border-slate-700/50 shadow-sm hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-500/50 transition-all duration-300 hover:-translate-y-1 cursor-default"
+                >
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-500/10 flex items-center justify-center group-hover:scale-110 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-500/20 transition-all duration-300">
+                    <CheckCircle2 className="text-indigo-600 dark:text-amber-400" size={20} strokeWidth={2.5} />
                   </div>
-                ))}
-              </div>
+                  <span className="font-semibold text-sm text-slate-700 dark:text-slate-200 tracking-wide">{item}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Upgraded CTA */}
+            <div className="pt-2">
               <button 
                 onClick={() => navigate('/about')}
-                className="group flex items-center gap-3 font-black text-indigo-600 dark:text-amber-400 uppercase text-xs tracking-widest hover:gap-5 transition-all"
+                className="group flex items-center gap-3 font-black text-indigo-600 dark:text-amber-400 uppercase text-xs tracking-[0.2em] hover:text-indigo-800 dark:hover:text-amber-300 transition-colors"
               >
-                Read Our Full Story <ArrowRight size={18} />
+                Read Our Full Story 
+                <ArrowRight 
+                  size={18} 
+                  className="group-hover:translate-x-2 transition-transform duration-300 ease-out" 
+                />
               </button>
             </div>
           </motion.div>
 
-          <div className="relative">
-             <div className="absolute -inset-4 bg-indigo-600/5 blur-3xl rounded-full" />
-             <div className="grid grid-cols-1 gap-8 relative z-10">
-                <VisionCard icon={<Eye />} title="Our Vision" color="bg-indigo-600" 
-                  desc="Fostering a world where every seeker has seamless access to spiritual guidance." />
-                <VisionCard icon={<Target />} title="Our Mission" color="bg-white dark:bg-slate-800" border
-                  desc="To preserve ancient temples and provide transparent digital platforms for rituals." />
+          {/* Right Column: Staggered Cards */}
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            whileInView={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.8, delay: 0.2 }}
+            viewport={{ once: true }}
+            className="relative"
+          >
+             {/* Complex Ambient Glow */}
+             <div className="absolute -inset-10 bg-gradient-to-tr from-indigo-600/15 via-transparent to-amber-500/10 blur-[80px] rounded-full pointer-events-none" />
+             
+             {/* Staggered Layout Container */}
+             <div className="relative z-10 flex flex-col gap-6 sm:gap-8">
+                <VisionCard 
+                  icon={<Eye />} 
+                  title="Our Vision" 
+                  color="bg-indigo-600 text-white" 
+                  desc="Fostering a world where every seeker has seamless access to spiritual guidance and divine connection." 
+                />
+                
+                {/* The 'Stagger' - Offsets the second card on larger screens */}
+                <div className="sm:ml-12 lg:ml-16">
+                  <VisionCard 
+                    icon={<Target />} 
+                    title="Our Mission" 
+                    color="bg-white dark:bg-slate-800/90 text-slate-900 dark:text-white" 
+                    border
+                    desc="To preserve ancient temples and provide transparent, highly secure digital platforms for sacred rituals." 
+                  />
+                </div>
              </div>
-          </div>
+          </motion.div>
         </div>
       </Element>
 
       {/* --- MEMBERSHIP (STM CLUB) SECTION --- */}
-      <section className="py-24 px-6 bg-white dark:bg-slate-950">
-        <div className="max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center bg-slate-900 dark:bg-indigo-950 rounded-[4rem] p-12 md:p-20 shadow-3xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-500/10 blur-[120px] rounded-full" />
+      <section className="py-32 px-6 bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
+        {/* Ambient Background Glows */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-indigo-500/5 dark:bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none" />
+
+        <div className="max-w-7xl mx-auto relative z-10">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-16 items-center bg-[#0B0F19] rounded-[3rem] p-10 md:p-20 shadow-2xl relative overflow-hidden border border-white/10">
             
-            <div className="lg:col-span-7 space-y-8">
-              <div className="flex items-center gap-3">
-                <Crown className="text-amber-400" size={24} />
-                <span className="text-amber-400 font-black uppercase tracking-[0.3em] text-[10px]">Premium Access</span>
+            {/* Animated Rotating Gradient Background */}
+            <motion.div 
+              animate={{ rotate: 360 }}
+              transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
+              className="absolute -top-[50%] -right-[20%] w-[800px] h-[800px] bg-gradient-to-b from-amber-500/10 via-indigo-500/5 to-transparent blur-[80px] rounded-full pointer-events-none" 
+            />
+            
+            {/* Left Column: Premium Copy */}
+            <div className="lg:col-span-6 space-y-8 relative z-10">
+              <div className="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-amber-400/10 border border-amber-400/20 backdrop-blur-md">
+                <Crown className="text-amber-400" size={18} />
+                <span className="text-amber-400 font-bold uppercase tracking-[0.2em] text-[10px]">Sovereign Access</span>
               </div>
-              <h2 className="text-4xl md:text-6xl font-serif font-bold text-white leading-tight italic">The STM Club</h2>
-              <p className="text-indigo-100/60 text-lg max-w-lg leading-relaxed font-medium">
-                Join the sovereign inner circle. Gain priority access to annual visits, personalized pooja services, and exclusive member-only vouchers.
+              
+              <h2 className="text-5xl md:text-7xl font-serif font-bold leading-tight italic bg-clip-text text-transparent bg-gradient-to-r from-white via-amber-100 to-amber-400 drop-shadow-sm">
+                The STM Club
+              </h2>
+              
+              <p className="text-slate-300 text-lg max-w-lg leading-relaxed font-light">
+                Step into the sovereign inner circle. Gain priority access to annual visits, personalized pooja services, and exclusive digital vouchers reserved only for members.
               </p>
-              <div className="flex flex-wrap gap-4 pt-4">
-                <button onClick={handleSTMClubClick} className="px-10 py-5 bg-white text-indigo-900 font-black rounded-2xl uppercase text-[10px] tracking-widest hover:bg-amber-400 transition-all shadow-xl">
-                  {user?.membership === "active" ? "My Membership Dashboard" : "Become a Sovereign Member"}
+              
+              <div className="pt-6">
+                <button 
+                  onClick={handleSTMClubClick} 
+                  className="group relative inline-flex items-center justify-center px-10 py-5 bg-gradient-to-r from-amber-500 to-amber-300 text-slate-900 font-black rounded-2xl uppercase text-xs tracking-widest overflow-hidden transition-all hover:scale-105 shadow-[0_0_40px_rgba(251,191,36,0.3)]"
+                >
+                  <span className="absolute inset-0 w-full h-full bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700 ease-out" />
+                  {user?.membership === "active" ? "My Membership Dashboard" : "Become a Member"}
                 </button>
               </div>
             </div>
 
-            <div className="lg:col-span-5 relative h-[450px] flex items-center justify-center">
+            {/* Right Column: Clean, Highly Visible Pricing Card */}
+            <div className="lg:col-span-6 relative h-[450px] flex items-center justify-center">
+              
               <AnimatePresence mode="wait">
                 {plans.length > 0 ? (
                   <motion.div
                     key={currentIndex}
-                    initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 1.1, y: -20 }}
-                    className="w-full max-w-sm p-12 rounded-[3rem] bg-white/5 backdrop-blur-3xl border border-white/10 text-center shadow-2xl relative overflow-hidden group"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ duration: 0.5, ease: "easeOut" }}
+                    className="w-full max-w-sm p-12 rounded-[2.5rem] bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-2xl border border-white/20 text-center shadow-2xl relative overflow-hidden group z-10"
                   >
-                    <div className="absolute -top-10 -right-10 w-32 h-32 bg-amber-400/10 blur-3xl rounded-full group-hover:bg-amber-400/20 transition-colors" />
-                    <Sparkles className="text-amber-400 mx-auto mb-6" size={36} />
-                    <h4 className="text-white/60 font-black uppercase tracking-[0.4em] text-[10px] mb-3">
-                      {plans[currentIndex]?.name}
-                    </h4>
-                    <div className="text-6xl font-black text-white mb-6 font-serif italic tracking-tighter">
-                      ₹{plans[currentIndex]?.price.toLocaleString()}
+                    {/* The Holographic Shine (Slightly more subtle) */}
+                    <motion.div
+                      animate={{ x: ['-150%', '250%'] }}
+                      transition={{ duration: 4, repeat: Infinity, ease: 'linear', repeatDelay: 2 }}
+                      className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12 z-0 pointer-events-none"
+                    />
+
+                    <div className="relative z-10">
+                      <h4 className="text-amber-400/90 font-black uppercase tracking-[0.3em] text-xs mb-4">
+                        {plans[currentIndex]?.name}
+                      </h4>
+                      
+                      {/* Highly Visible Price */}
+                      <div className="text-7xl font-black text-white mb-8 font-serif tracking-tight drop-shadow-lg flex items-start justify-center">
+                        <span className="text-3xl text-white/50 mt-2 mr-1">₹</span>
+                        {plans[currentIndex]?.price?.toLocaleString()}
+                      </div>
+                      
+                      {/* Highlighted 'Sacred Visits' Container */}
+                      <div className="inline-flex items-center justify-center gap-3 w-full py-4 bg-gradient-to-r from-amber-500/10 via-amber-500/20 to-amber-500/10 border border-amber-400/30 rounded-2xl text-amber-300 text-sm font-black uppercase tracking-[0.15em] mb-10 shadow-[0_0_20px_rgba(251,191,36,0.1)]">
+                        <Gift size={18} className="text-amber-400" /> 
+                        <span>{plans[currentIndex]?.visits} Sacred Visits</span>
+                      </div>
+                      
+                      <button onClick={handleSTMClubClick} className="text-white/80 text-[11px] font-black uppercase tracking-[0.2em] hover:text-white transition-colors flex items-center justify-center gap-2 mx-auto border-b border-transparent hover:border-white pb-1">
+                        View Plan Benefits <ArrowRight size={14} />
+                      </button>
                     </div>
-                    <div className="flex items-center justify-center gap-2 text-amber-400 text-xs font-black uppercase mb-10 tracking-[0.1em]">
-                      <Gift size={14} /> {plans[currentIndex]?.visits} Sacred Visits Included
-                    </div>
-                    <div className="h-[1px] w-16 bg-white/20 mx-auto mb-10" />
-                    <button onClick={handleSTMClubClick} className="text-white text-[10px] font-black uppercase tracking-[0.2em] border-b-2 border-amber-400/30 hover:border-amber-400 transition-all pb-2">
-                      View Plan Benefits
-                    </button>
                   </motion.div>
                 ) : (
-                  <div className="text-indigo-100/20 font-black uppercase tracking-widest animate-pulse">Loading Plans...</div>
+                  <div className="text-white/30 font-black uppercase tracking-widest animate-pulse z-10">Loading Sovereign Plans...</div>
                 )}
               </AnimatePresence>
             </div>
+
           </div>
         </div>
       </section>
+
 
       {/* --- DIVINE SERVICES --- */}
       <section className="py-32 px-6">

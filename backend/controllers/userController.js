@@ -13,9 +13,6 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-/**
- * 1. SIGNUP
- */
 exports.signupUser = async (req, res) => {
     try {
         const { first_name, last_name, email, mobile_number, password } = req.body;
@@ -56,9 +53,6 @@ exports.signupUser = async (req, res) => {
     } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 };
 
-/**
- * 2. VERIFY OTP
- */
 exports.verifyOtp = async (req, res) => {
     try {
         const { mobile_number, otp } = req.body;
@@ -75,9 +69,6 @@ exports.verifyOtp = async (req, res) => {
     } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 };
 
-/**
- * 3. LOGIN
- */
 exports.loginUser = async (req, res) => {
     try {
         const { mobile, password } = req.body;
@@ -89,48 +80,24 @@ exports.loginUser = async (req, res) => {
     } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 };
 
-/**
- * 4. GET PROFILE (Fixed syntax and aliased for Line 8)
- */
-/**
- * 4. GET PROFILE (Universal for Admin 1, Temple Admin 2, User 3)
- */
-/**
- * 4. GET PROFILE - Final Universal Version
- * Matches Flutter Constants, BLoC Logic, and React Admin Needs
- */
 exports.getProfile = async (req, res) => {
     try {
-        // Fetch user based on ID from Auth Middleware
         const user = await User.findById(req.user.id).select("-password");
-        //if (!user) return res.status(404).json({ status: "false", message: "User not found" });
         
         if (!user) {
-            return res.status(404).json({ 
-                status: "false", 
-                success: false, 
-                message: "User not found" 
-            });
+            return res.status(404).json({ status: "false", success: false, message: "User not found" });
         }
 
-        // --- 🎯 THE "FLUTTER CONTRACT" SYNC ---
         return res.status(200).json({
-            status: "true",  // ✅ Required as String for Flutter
-            success: true,   // ✅ Required as Boolean for React/Web
-            // 🛑 CRITICAL: This MUST match Constants.profileSuccessMsg in strings.dart exactly
+            status: "true",  
+            success: true,   
             message: "Profile retrieved successfully.", 
-
             data: {
-                // 1. ID MIRRORING (Fixes "String is not a subtype of int")
                 user_id: user.sql_id || parseInt(user._id.toString().substring(0, 8), 16),
                 userId: user.sql_id || parseInt(user._id.toString().substring(0, 8), 16),
-                id: user._id.toString(), // For MongoDB standard use
-
-                // 2. TYPE MIRRORING (Fixes "int is not a subtype of String")
+                id: user._id.toString(),
                 user_type: String(user.user_type || "3"),
                 userType: String(user.user_type || "3"),
-
-                // 3. PERSONAL DETAILS (Matches my_profile_screen.dart containers)
                 first_name: user.first_name || "",
                 firstName: user.first_name || "",
                 last_name: user.last_name || "",
@@ -139,15 +106,12 @@ exports.getProfile = async (req, res) => {
                 email: user.email || "",
                 mobile_number: user.mobile_number || "",
                 mobileNumber: user.mobile_number || "",
-                
-                // 4. MEDIA & META
                 profile_picture: user.profile_picture || "",
                 profilePicture: user.profile_picture || "",
+                banner_image: user.banner_image || "", // 🎯 Return banner image
                 date_of_birth: user.date_of_birth || "",
                 dateOfBirth: user.date_of_birth || "",
                 gender: String(user.gender || "1"),
-                
-                // Dynamic Role Assignment
                 role: user.role || (user.user_type === 1 ? "admin" : user.user_type === 2 ? "temple_admin" : "user"),
                 is_verified: user.is_verified || false
             }
@@ -157,13 +121,10 @@ exports.getProfile = async (req, res) => {
         res.status(500).json({ status: "false", success: false, message: error.message });
     }
 };
-/**
- * 4.5 UPDATE PROFILE (For Logged-in User)
- * This handles the request from Flutter's ProfileBloc
- */
+
 exports.updateProfile = async (req, res) => {
     try {
-        const userId = req.user.id; // From Protect Middleware
+        const userId = req.user.id; 
         const { first_name, last_name, email, mobile_number, date_of_birth, gender } = req.body;
 
         const updateData = {
@@ -176,15 +137,23 @@ exports.updateProfile = async (req, res) => {
             name: `${first_name} ${last_name || ''}`.trim()
         };
 
-        // If a file was uploaded via Multer
-        if (req.file && req.files.profile_picture) {
-            updateData.profile_picture = req.file.profile_picture.path;
+        // 🎯 THE FIX: Handle BOTH profile_picture AND banner_image from upload.fields()
+        if (req.files) {
+            if (req.files.profile_picture && req.files.profile_picture.length > 0) {
+                updateData.profile_picture = req.files.profile_picture[0].path;
+            }
+            if (req.files.banner_image && req.files.banner_image.length > 0) {
+                updateData.banner_image = req.files.banner_image[0].path;
+            }
+        } else if (req.file) {
+            // Fallback for upload.single() from Flutter
+            updateData.profile_picture = req.file.path;
         }
 
         const updatedUser = await User.findByIdAndUpdate(
             userId,
             { $set: updateData },
-            { new: true, runValidators: true }
+            { returnDocument: 'after', runValidators: true }
         ).select("-password");
 
         if (!updatedUser) {
@@ -194,7 +163,6 @@ exports.updateProfile = async (req, res) => {
         return res.status(200).json({
             status: "true",
             success: true,
-            // 🛑 CRITICAL: This MUST match Constants.profileUpdateSuccessMsg in Flutter
             message: "Profile updated successfully.", 
             data: {
                 user_id: updatedUser.sql_id || parseInt(updatedUser._id.toString().substring(0, 8), 16),
@@ -205,6 +173,7 @@ exports.updateProfile = async (req, res) => {
                 date_of_birth: updatedUser.date_of_birth || "",
                 gender: String(updatedUser.gender || "1"),
                 profile_picture: updatedUser.profile_picture || "",
+                banner_image: updatedUser.banner_image || "", // 🎯 Send back the updated banner
                 user_type: String(updatedUser.user_type || "3")
             }
         });
@@ -214,9 +183,6 @@ exports.updateProfile = async (req, res) => {
     }
 };
 
-/**
- * 5. ADMIN MANAGEMENT
- */
 exports.getAllUsers = async (req, res) => {
     try {
         const users = await User.find().select("-password").sort({ created_at: -1 });
@@ -233,9 +199,30 @@ exports.getUserById = async (req, res) => {
 
 exports.updateUser = async (req, res) => {
     try {
-        const updated = await User.findByIdAndUpdate(req.params.id, req.body, { new: true }).select("-password");
+        const updateData = { ...req.body };
+
+        // 🎯 THE FIX applied here as well for Admin actions
+        if (req.files) {
+            if (req.files.profile_picture) updateData.profile_picture = req.files.profile_picture[0].path;
+            if (req.files.banner_image) updateData.banner_image = req.files.banner_image[0].path;
+        } else if (req.file) {
+            updateData.profile_picture = req.file.path;
+        }
+
+        const updated = await User.findByIdAndUpdate(
+            req.params.id, 
+            { $set: updateData }, 
+            { returnDocument: 'after' }
+        ).select("-password");
+
+        if (!updated) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
         res.status(200).json({ success: true, data: updated });
-    } catch (error) { res.status(400).json({ success: false, message: "Update failed" }); }
+    } catch (error) { 
+        res.status(400).json({ success: false, message: error.message || "Update failed" }); 
+    }
 };
 
 exports.deleteUser = async (req, res) => {
@@ -249,7 +236,6 @@ exports.forgotPassword = async (req, res) => {
     try {
         const { mobile_number, email } = req.body;
         
-        // 1. Clean the input (Handle +91 from Flutter)
         let query = {};
         if (mobile_number) {
             const cleanMobile = String(mobile_number).replace(/\D/g, "").slice(-10);
@@ -263,13 +249,11 @@ exports.forgotPassword = async (req, res) => {
         const user = await User.findOne(query);
         if (!user) return res.status(404).json({ status: "false", message: "User not found." });
 
-        // 2. Generate and Save OTP
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         user.otp = otp;
         user.otp_expires = new Date(Date.now() + 10 * 60 * 1000);
         await user.save();
 
-        // 3. Send via Email (Currently using your verified Sarvatirthamayi Gmail)
         try {
             await transporter.sendMail({
                 from: process.env.MAIL_FROM,
@@ -277,18 +261,16 @@ exports.forgotPassword = async (req, res) => {
                 subject: "Reset Password OTP",
                 html: `<h1>Your Reset Code: ${otp}</h1>`
             });
-            console.log(`✅ Reset OTP sent to: ${user.email}`);
         } catch (err) {
             console.log(`❌ Mail failed. USE THIS OTP FOR TESTING: ${otp}`);
         }
 
-        // 4. Flutter Expects 'data.id' as the user identifier for the next screen
         res.status(200).json({ 
             status: "true", 
             success: true, 
             message: "OTP sent successfully.",
             data: { 
-                id: user.sql_id || user._id.toString(), // 🎯 Matches state.forgotPasswordModel?.data?.id
+                id: user.sql_id || user._id.toString(), 
                 mobile_number: user.mobile_number 
             } 
         });
@@ -297,21 +279,14 @@ exports.forgotPassword = async (req, res) => {
     }
 };
 
-
-/**
- * RESET PASSWORD
- * Matches Flutter: ResetPassResponseEvent(userId, otp, password, confirmPassword)
- */
 exports.resetPassword = async (req, res) => {
     try {
         const { user_id, password, confirm_password, otp } = req.body;
 
-        // 1. Validation
         if (password !== confirm_password) {
             return res.status(400).json({ status: "false", message: "Passwords do not match." });
         }
 
-        // 2. Find user (Supports C: Drive Integer ID or Mongo String ID)
         const user = await User.findOne({
             $or: [
                 { sql_id: !isNaN(user_id) ? Number(user_id) : -1 },
@@ -323,9 +298,8 @@ exports.resetPassword = async (req, res) => {
             return res.status(400).json({ status: "false", message: "Invalid or Expired OTP." });
         }
 
-        // 3. Update Password (User.js pre-save hook handles hashing automatically)
         user.password = password;
-        user.otp = undefined; // Clear OTP after success
+        user.otp = undefined; 
         await user.save();
 
         res.status(200).json({ 
@@ -338,23 +312,21 @@ exports.resetPassword = async (req, res) => {
     }
 };
 
-
-// --- FINAL EXPORTS WITH ALIASES TO STOP THE CRASH ---
 module.exports = {
     signupUser: exports.signupUser,
-    signUp: exports.signupUser,     // Alias
+    signUp: exports.signupUser,     
     verifyOtp: exports.verifyOtp,
-    verifyOTP: exports.verifyOtp,   // Alias
+    verifyOTP: exports.verifyOtp,   
     loginUser: exports.loginUser,
-    login: exports.loginUser,       // Alias
-    getProfile: exports.getProfile, // 🎯 Standard
+    login: exports.loginUser,       
+    getProfile: exports.getProfile, 
     updateProfile: exports.updateProfile,
-    checkAuth: exports.getProfile,  // 🎯 Common Line 8 Alias
-    getMe: exports.getProfile,      // 🎯 Common Line 8 Alias
+    checkAuth: exports.getProfile,  
+    getMe: exports.getProfile,      
     getAllUsers: exports.getAllUsers,
     getUserById: exports.getUserById,
-    forgotPassword: exports.forgotPassword, // 🎯 Added
-    resetPassword: exports.resetPassword,   // 🎯 Added
+    forgotPassword: exports.forgotPassword, 
+    resetPassword: exports.resetPassword,   
     updateUser: exports.updateUser,
     deleteUser: exports.deleteUser
 };

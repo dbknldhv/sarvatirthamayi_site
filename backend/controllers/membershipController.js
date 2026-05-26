@@ -14,17 +14,19 @@ exports.getTemplesList = async (req, res) => {
     }
 };
 
-/**
- * 2. Fetch all memberships
- */
 exports.getAllMemberships = async (req, res) => {
     try {
         const memberships = await Membership.find()
-            .sort({ createdAt: -1 })
-            .populate("temples.templeId", "name");
-        res.status(200).json(memberships);
+            .sort({ created_at: -1 })
+            .lean();
+
+        return res.status(200).json(memberships);
     } catch (error) {
-        res.status(500).json({ message: "Error fetching memberships", error: error.message });
+        console.error("Error fetching memberships:", error);
+        return res.status(500).json({
+            message: "Error fetching memberships",
+            error: error.message,
+        });
     }
 };
 

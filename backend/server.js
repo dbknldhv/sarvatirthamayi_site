@@ -7,6 +7,7 @@
 const path = require("path");
 const fs = require("fs");
 const dotenv = require("dotenv");
+const cookieParser = require("cookie-parser");
 
 // --- 2. LOAD ENVIRONMENT VARIABLES ---
 const envResult = dotenv.config({ path: path.join(__dirname, ".env") });
@@ -86,6 +87,7 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
 
 // --- 6. STATIC FILES ---
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -108,13 +110,10 @@ app.use('/api/admin/auth', authRoutes);
 app.use("/api/admin", adminRoutes); 
 app.use("/api/user", userRoutes);
 
-
 app.use('/api/v1', authRoutes); 
 app.use('/api/v1/user', userRoutes);
-app.use('/api/v1', userRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/home', homeRoutes);
-
 // Optional: If your Flutter app calls /api/v1/admin/auth/login specifically
 app.use('/api/v1/admin/auth', authRoutes);
 

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { userService } from "../../../services/userService";
 import { getFullImageUrl } from "../../../utils/config";
-import { toast } from "react-hot-toast";
+import { toast, Toaster } from "react-hot-toast"; // 🎯 FIX 1: Imported Toaster!
 import { User as UserIcon, Loader2, Calendar } from "lucide-react";
 
 const EditUser = () => {
@@ -62,16 +62,36 @@ const EditUser = () => {
     e.preventDefault();
     setSaving(true);
     
-    const data = new FormData();
-    Object.keys(formData).forEach(key => data.append(key, formData[key]));
-    if (selectedFile) data.append("profile_picture", selectedFile);
-
     try {
-      await userService.updateUser(id, data);
-      toast.success("User Profile Updated Successfully!");
-      setTimeout(() => navigate("/admin/user/list"), 1500);
+      let payload;
+
+      if (selectedFile) {
+        payload = new FormData();
+        Object.keys(formData).forEach(key => payload.append(key, formData[key]));
+        payload.append("profile_picture", selectedFile);
+      } else {
+        payload = { ...formData };
+      }
+
+      await userService.updateUser(id, payload);
+      
+      // 🎯 FIX 2: Trigger the visual success popup!
+      toast.success("User Profile Updated Successfully!", {
+        duration: 2000,
+        style: {
+          borderRadius: '10px',
+          background: '#10B981',
+          color: '#fff',
+          fontWeight: 'bold',
+        },
+      });
+
+      // Wait 2 seconds so the Admin can read the popup before leaving the page
+      setTimeout(() => navigate("/admin/user/list"), 2000);
     } catch (error) {
-      toast.error(error.response?.data?.message || "Update failed");
+      toast.error(error.response?.data?.message || "Update failed", {
+        style: { borderRadius: '10px', background: '#EF4444', color: '#fff' }
+      });
     } finally {
       setSaving(false);
     }
@@ -84,7 +104,11 @@ const EditUser = () => {
   );
 
   return (
-    <div className="p-4 md:p-8 bg-[#F8F9FC] min-h-screen font-sans">
+    <div className="p-4 md:p-8 bg-[#F8F9FC] min-h-screen font-sans relative">
+      
+      {/* 🎯 FIX 3: Mount the Toaster so the popups actually show up on screen! */}
+      <Toaster position="top-center" reverseOrder={false} />
+
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-gray-400 text-xs mb-6">
         <span className="hover:text-[#6366F1] cursor-pointer" onClick={() => navigate("/admin/user/list")}>Users</span>
@@ -127,7 +151,6 @@ const EditUser = () => {
           {/* Form Inputs Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
             
-            {/* First Name */}
             <div className="space-y-2">
               <label className="text-[11px] font-bold text-gray-500 uppercase tracking-tight ml-1">First Name</label>
               <input 
@@ -138,7 +161,6 @@ const EditUser = () => {
               />
             </div>
 
-            {/* Last Name */}
             <div className="space-y-2">
               <label className="text-[11px] font-bold text-gray-500 uppercase tracking-tight ml-1">Last Name</label>
               <input 
@@ -148,7 +170,6 @@ const EditUser = () => {
               />
             </div>
 
-            {/* E-Mail */}
             <div className="space-y-2">
               <label className="text-[11px] font-bold text-gray-500 uppercase tracking-tight ml-1">E-Mail</label>
               <input 
@@ -159,7 +180,6 @@ const EditUser = () => {
               />
             </div>
 
-            {/* Phone Number */}
             <div className="space-y-2">
               <label className="text-[11px] font-bold text-gray-500 uppercase tracking-tight ml-1">Phone Number</label>
               <div className="relative">
@@ -172,7 +192,6 @@ const EditUser = () => {
               </div>
             </div>
 
-            {/* Date of Birth */}
             <div className="space-y-2">
               <label className="text-[11px] font-bold text-gray-500 uppercase tracking-tight ml-1">Date of Birth</label>
               <div className="relative">
@@ -185,7 +204,6 @@ const EditUser = () => {
               </div>
             </div>
 
-            {/* Gender */}
             <div className="space-y-2">
               <label className="text-[11px] font-bold text-gray-500 uppercase tracking-tight ml-1">Gender</label>
               <select 

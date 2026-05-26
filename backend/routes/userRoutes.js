@@ -95,7 +95,7 @@ router.get("/profile", protect, userController.getProfile);
 router.post("/profile", protect, upload.fields([{ name: "profile_picture", maxCount: 1 }]), userController.updateProfile);
 router.put("/update-profile", protect, upload.fields([
     { name: "profile_picture", maxCount: 1 },
-    { name: "bannerImage", maxCount: 1 },
+    { name: "banner_image", maxCount: 1 },
   ]), userController.updateProfile);
 
 // --- Temple Booking Flow ---
@@ -108,6 +108,8 @@ router.get("/membership-card/index", protect, getActiveMemberships);
 router.post("/membership-card/purchase", protect, purchaseMembershipCard);
 router.post("/membership-card/verify-payment", protect, verifyMembershipPayment);
 router.get("/membership-card/my-card", protect, getMyMembershipCard);
+// Add this line in the Public section (No 'protect' middleware)
+router.get("/membership-plans/active", getActiveMemberships);
 
 // --- Legacy Compatibility ---
 router.post("/book-temple/create-order", protect, templeBookingController.createTempleBookingOrder);

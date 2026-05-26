@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext"; 
+import { authService } from "../../services/authService"; // 🎯 FIX: Import our dedicated service!
 import logo from "../../assets/favicon.ico";
 import backgroundImage from "../../assets/Admin_bg.jpg"; 
 import { Eye, EyeOff, Loader2, AlertCircle, Sun, Moon } from "lucide-react";
 
 export default function AdminLogin() {
-  const { user, login, logout, dark, setDark } = useAuth(); 
+  // 🎯 FIX: Removed 'login' from AuthContext so we don't cross wires with user routing!
+  const { user, logout, dark, setDark } = useAuth(); 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -23,9 +25,9 @@ export default function AdminLogin() {
   // 🛡️ Auto-Redirect: If user state is populated, send them to their respective dashboard
   useEffect(() => {
     if (user) {
-      if (user.user_type === 1) {
+      if (Number(user.user_type) === 1) {
         navigate("/admin/dashboard", { replace: true });
-      } else if (user.user_type === 2) {
+      } else if (Number(user.user_type) === 2) {
         navigate("/temple-admin/dashboard", { replace: true });
       }
     }
@@ -37,14 +39,16 @@ export default function AdminLogin() {
     setError("");
 
     try {
-      // 1. Execute login via AuthContext
-      const response = await login({ email, password });
+      // 🎯 FIX: Use the dedicated Admin Login so we don't accidentally redirect to the User Profile!
+      const response = await authService.adminLogin(email, password);
       
-      if (response && response.user) {
-        const userType = response.user.user_type;
+      const userData = response?.data || response?.user;
+
+      if (response && (response.success || response.status === "true") && userData) {
+        // Ensure user_type is treated as a Number
+        const userType = Number(userData.user_type);
 
         // 2. Portal Validation (Guard Rails)
-        // User Type 1 = Super Admin, User Type 2 = Temple Admin
         if (isTempleLogin && userType !== 2) {
           await logout(); 
           throw new Error("Access Denied: This account is not a Temple Admin.");
@@ -54,9 +58,14 @@ export default function AdminLogin() {
           throw new Error("Access Denied: Please use the Temple Admin portal.");
         }
 
-        // 3. Immediate Navigation feedback
+        // 3. 🎯 BULLETPROOF REDIRECT
+        // Using window.location.href forces the app to reload and cleanly mount the Admin Dashboard
         const target = userType === 1 ? "/admin/dashboard" : "/temple-admin/dashboard";
-        navigate(target, { replace: true });
+        window.location.href = target;
+        
+      } else if (response && (!response.success && response.status !== "true")) {
+        // Catch cases where backend returns 200 OK but success is false
+        throw new Error(response.message || "Invalid credentials.");
       }
     } catch (err) {
       // 🛠️ Intelligent Error Parsing
@@ -139,24 +148,28 @@ export default function AdminLogin() {
               </div>
 
               {/* Password Field */}
-              {/* Password Field */}
-<div className="space-y-2 relative">
-  <label className="text-[10px] font-bold text-white/70 uppercase tracking-[2px] ml-1">
-    Password
-  </label>
-  <div className="relative group"> {/* Added group for potential hover effects */}
-    <input
-      type={showPassword ? "text" : "password"}
-      placeholder="••••••••"
-      value={password}
-      onChange={(e) => setPassword(e.target.value)}
-      required
-      // Added pr-12 to ensure text doesn't go under the eye icon
-      className="w-full px-4 pr-12 py-3.5 rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-white/40 focus:ring-2 focus:ring-indigo-400 focus:bg-white/20 outline-none transition-all appearance-none"
-    />
-    
-  </div>
-</div>
+              <div className="space-y-2 relative">
+                <label className="text-[10px] font-bold text-white/70 uppercase tracking-[2px] ml-1">
+                  Password
+                </label>
+                <div className="relative group"> 
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    className="w-full px-4 pr-12 py-3.5 rounded-xl bg-white/10 border border-white/20 text-white placeholder:text-white/40 focus:ring-2 focus:ring-indigo-400 focus:bg-white/20 outline-none transition-all appearance-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-white/50 hover:text-white/80 transition-colors"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
 
               {/* Submit Button */}
               <button

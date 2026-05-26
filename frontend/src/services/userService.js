@@ -1,33 +1,30 @@
-// src/services/userService.js
 import api from "../api/api"; 
 
 export const userService = {
   getUsers: async () => {
-    const response = await api.get("/admin/users");
-    return response.data;
+    const timestamp = new Date().getTime();
+    const response = await api.get(`/admin/users?_t=${timestamp}`);
+    return response.data?.users || response.data?.data || [];
   },
 
   getUserById: async (id) => {
-    const response = await api.get(`/admin/users/${id}`);
-    return response.data;
+    const timestamp = new Date().getTime();
+    const response = await api.get(`/admin/users/${id}?_t=${timestamp}`);
+    return response.data?.user || response.data?.data || null;
   },
 
-  // Updated to handle FormData for Image Uploads
   createUser: async (data) => {
     const config = data instanceof FormData 
       ? { headers: { 'Content-Type': 'multipart/form-data' } }
       : {};
-      
     const response = await api.post("/admin/users/create", data, config);
     return response.data;
   },
 
-  // Updated to handle FormData for Image Uploads
   updateUser: async (id, data) => {
     const config = data instanceof FormData 
       ? { headers: { 'Content-Type': 'multipart/form-data' } }
       : {};
-
     const response = await api.put(`/admin/users/update/${id}`, data, config);
     return response.data;
   },
