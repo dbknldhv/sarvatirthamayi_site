@@ -65,12 +65,10 @@ exports.signupUser = async (req, res) => {
         password,
         user_type: 3
       });
-      // OTP params explicitly set
       user.otp = otp;
       user.otp_expires = otpExpires;
     }
 
-    // Schema hook handles auto-generating sql_id, name, role mapping, and password hash
     await user.save();
 
     try {
@@ -126,7 +124,6 @@ exports.verifyOtp = async (req, res) => {
     user.otp = null;
     user.otp_expires = null;
     
-    // Save to trigger schema hooks
     await user.save();
 
     const token = jwt.sign({ id: user._id, sql_id: user.sql_id }, process.env.JWT_SECRET, { expiresIn: "30d" });
@@ -247,7 +244,6 @@ exports.loginUser = async (req, res) => {
 // --- PROFILE MANAGEMENT ---
 exports.getProfile = async (req, res) => {
   try {
-    // Gracefully handle token payload location fallbacks from your AuthMiddleware
     const searchId = req.user.id || req.user._id;
 
     if (!searchId) {
@@ -294,23 +290,53 @@ exports.getProfile = async (req, res) => {
   }
 };
 
+// 🔥 TRACEABLE PROFILE UPDATE CONTROLLER METHOD WITH DETAILED LOGGER LAYERS
 exports.updateProfile = async (req, res) => {
-  try {
-    const searchId = req.user.id || req.user._id;
+  // 🎯 Layer 1: Track payload metrics received from MultiPart forms
+  console.log("==================================================");
+  console.log("🚀 Incoming Update Profile Request Traced");
+  console.log("📱 Text Fields (req.body):", JSON.stringify(req.body, null, 2));
+  console.log("🖼️ Single File Fallback (req.file):", req.file ? {
+    fieldname: req.file.fieldname,
+    filename: req.file.filename,
+    path: req.file.path,
+    size: req.file.size
+  } : "None");
+  console.log("🗂️ Multiple Fields (req.files):", req.files ? Object.keys(req.files).map(key => ({
+    field: key,
+    filesCount: req.files[key].length,
+    details: req.files[key].map(f => ({ name: f.filename, path: f.path, size: f.size }))
+  })) : "None");
+  console.log("==================================================");
 
+  try {
+    const searchId = req.user?.id || req.user?._id;
+
+    // 🎯 Layer 2: Catch missing Auth Context session parameters
     if (!searchId) {
-      return res.status(401).json({ status: "false", success: false, message: "Unauthorized validation lookup error." });
+      console.error("❌ Auth Error: req.user validation lookup context is missing or null!");
+      return res.status(401).json({ 
+        status: "false", 
+        success: false, 
+        message: "Unauthorized lookup block. Session might be invalid." 
+      });
     }
 
-    // Fetch the target mutable user document model instance
     const user = await User.findById(searchId);
+    
+    // 🎯 Layer 3: Catch missing Database Records
     if (!user) {
-      return res.status(404).json({ status: "false", success: false, message: "User profile records not found" });
+      console.error(`❌ DB Error: User with ID ${searchId} not found in MongoDB collection.`);
+      return res.status(404).json({ 
+        status: "false", 
+        success: false, 
+        message: "User profile records not found." 
+      });
     }
 
     const { first_name, last_name, email, mobile_number, date_of_birth, gender } = req.body;
 
-    // Apply fields safely directly on the document instance
+    // Apply plain text parameter updates safely
     if (first_name !== undefined) user.first_name = first_name;
     if (last_name !== undefined) user.last_name = last_name;
     if (email !== undefined) user.email = String(email).toLowerCase().trim();
@@ -321,43 +347,60 @@ exports.updateProfile = async (req, res) => {
       user.mobile_number = String(mobile_number).replace(/\D/g, "").slice(-10);
     }
 
-    // Handle incoming multipart form image fields
+    // 🎯 Layer 4: Explicit Multer incoming buffer tracers mapping to storage
     if (req.files) {
-        if (req.files.profile_picture && req.files.profile_picture.length > 0) {
-            user.profile_picture = req.files.profile_picture[0].path;
-        }
-        if (req.files.banner_image && req.files.banner_image.length > 0) {
-            user.banner_image = req.files.banner_image[0].path;
-        }
+      if (req.files.profile_picture && req.files.profile_picture.length > 0) {
+        console.log(`💾 Mapping Profile Pic to DB Path: ${req.files.profile_picture[0].path}`);
+        user.profile_picture = req.files.profile_picture[0].path;
+      }
+      if (req.files.banner_image && req.files.banner_image.length > 0) {
+        console.log(`💾 Mapping Banner Image to DB Path: ${req.files.banner_image[0].path}`);
+        user.banner_image = req.files.banner_image[0].path;
+      }
     } else if (req.file) {
-        user.profile_picture = req.file.path;
+      console.log(`💾 Fallback Single File Mapping to DB Path: ${req.file.path}`);
+      user.profile_picture = req.file.path;
     }
 
-    // Save triggers the new pre-save hooks to automatically recalculate name & role mappings
-    await user.save();
+    // Save triggers recalculation and schema hooks
+    const updatedUser = await user.save();
+    console.log("✅ MongoDB document saved successfully for user:", searchId);
 
     return res.status(200).json({
       status: "true",
       success: true,
       message: "Profile updated successfully.",
       data: {
-        user_id: user.sql_id,
-        userId: user.sql_id,
-        id: user._id.toString(),
-        mongo_id: user._id.toString(),
-        first_name: user.first_name || "",
-        last_name: user.last_name || "",
-        email: user.email || "",
-        mobile_number: user.mobile_number || "",
-        date_of_birth: user.date_of_birth || "",
-        gender: String(user.gender || "1"),
-        user_type: String(user.user_type || "3"),
-        profile_picture: user.profile_picture ? getFullImageUrl(user.profile_picture) : "",
-        banner_image: user.banner_image ? getFullImageUrl(user.banner_image) : ""
+        user_id: updatedUser.sql_id,
+        userId: updatedUser.sql_id,
+        id: updatedUser._id.toString(),
+        mongo_id: updatedUser._id.toString(),
+        first_name: updatedUser.first_name || "",
+        last_name: updatedUser.last_name || "",
+        email: updatedUser.email || "",
+        mobile_number: updatedUser.mobile_number || "",
+        date_of_birth: updatedUser.date_of_birth || "",
+        gender: String(updatedUser.gender || "1"),
+        user_type: String(updatedUser.user_type || "3"),
+        profile_picture: updatedUser.profile_picture ? getFullImageUrl(updatedUser.profile_picture) : "",
+        banner_image: updatedUser.banner_image ? getFullImageUrl(updatedUser.banner_image) : ""
       },
     });
+
   } catch (error) {
-    return res.status(500).json({ status: "false", success: false, message: error.message });
+    // 🎯 Layer 5: Comprehensive Catch Block Tracker for crashes or database constraint checks
+    console.error("🔥 CRITICAL CONTROLLER CRASH CAPTURED 🔥");
+    console.error("🚨 Error Name:", error.name);
+    console.error("🚨 Error Message:", error.message);
+    console.error("🚨 Stack Trace:\n", error.stack);
+    console.log("==================================================");
+
+    return res.status(500).json({ 
+      status: "false", 
+      success: false, 
+      type: error.name,
+      message: `Internal Server Error: ${error.message}` 
+    });
   }
 };
 
@@ -445,7 +488,7 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({ status: "false", success: false, message: "Invalid/Expired OTP parameters handled." });
     }
 
-    user.password = new_password; // Plain pass reassignment here accurately gets rehashed by schema hooks
+    user.password = new_password; 
     user.otp = null;
     user.otp_expires = null;
     await user.save();
