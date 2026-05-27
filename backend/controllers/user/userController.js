@@ -520,4 +520,4 @@ exports.getAllRituals = async (req, res) => res.status(200).json({ success: true
 exports.getMembershipPlans = async (req, res) => res.status(200).json({ success: true, data: [] });
 exports.getAssistantsByTemple = async (req, res) => res.status(200).json({ success: true, data: [] });
 exports.bookRitual = async (req, res) => res.status(200).json({ success: true, message: "Booking received!" });
-exports.purchaseMembership = async (req, res) => res.status(200).json({ success: true, message: "Purchase successful!" });s
+exports.purchaseMembership = async (req, res) => res.status(200).json({ success: true, message: "Purchase successful!" });

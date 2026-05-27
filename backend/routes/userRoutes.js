@@ -92,24 +92,16 @@ router.get("/auth/check-auth", protect, (req, res) => {
   res.status(200).json({ success: true, user: req.user });
 });
 
-<<<<<<< Updated upstream
-router.get("/profile", protect, userController.getProfile);
-
-=======
 // 🎯 Fetch Profile Data
 router.get("/profile", protect, userController.getProfile);
 
 // 🎯 Reusable Unified Image Configuration fields
->>>>>>> Stashed changes
 const profileUploadFields = upload.fields([
   { name: "profile_picture", maxCount: 1 },
   { name: "banner_image", maxCount: 1 },
 ]);
 
-<<<<<<< Updated upstream
-=======
 // 🎯 Complete compatibility fallback mapping for React & Flutter requests
->>>>>>> Stashed changes
 router.post("/profile", protect, profileUploadFields, userController.updateProfile);
 router.put("/profile", protect, profileUploadFields, userController.updateProfile);
 router.put("/update-profile", protect, profileUploadFields, userController.updateProfile);
