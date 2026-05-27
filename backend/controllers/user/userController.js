@@ -1,22 +1,21 @@
 const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
 const nodemailer = require("nodemailer");
-const db = require("../../config/db");
 const { sendSMS } = require("../../utils/smsProvider"); 
 
+// --- HELPER: FORMAT FILE SYSTEM PATHS TO FULL PUBLIC WEB URLS ---
 const getFullImageUrl = (path) => {
   if (!path) return "";
   if (path.startsWith("http")) return path;
   
-  // Use localhost for local testing. Change back to production URL when deploying.
   const baseUrl = process.env.NODE_ENV === 'production' 
     ? "https://api.sarvatirthamayi.com" 
-    : "http://localhost:5000"; // <-- Change 5000 to whatever port your backend uses
+    : "http://localhost:5000";
 
   return `${baseUrl}/${path.replace(/\\/g, "/")}`;
 };
 
-// --- EMAIL CONFIGURATION ---
+// --- NODEMAILER SMTP ENGINE TRANSPORT ---
 const transporter = nodemailer.createTransport({
   host: process.env.MAIL_HOST,
   port: parseInt(process.env.MAIL_PORT, 10) || 465,
@@ -27,16 +26,6 @@ const transporter = nodemailer.createTransport({
   },
   tls: { rejectUnauthorized: false },
 });
-
-// --- HELPER: ENSURE LEGACY NUMERIC sql_id EXISTS ---
-const ensureUserSqlId = async (user) => {
-  if (user.sql_id && Number(user.sql_id) > 0) return Number(user.sql_id);
-  const lastUser = await User.findOne({ sql_id: { $ne: null } }).sort({ sql_id: -1 }).select("sql_id");
-  const nextSqlId = Number(lastUser?.sql_id || 0) + 1;
-  user.sql_id = nextSqlId;
-  await user.save();
-  return nextSqlId;
-};
 
 // --- AUTHENTICATION: SIGNUP & SEND OTP ---
 exports.signupUser = async (req, res) => {
@@ -68,26 +57,22 @@ exports.signupUser = async (req, res) => {
       user.email = cleanEmail;
       user.mobile_number = cleanMobile;
     } else {
-
-      const newSqlId = Math.floor(100000 + Math.random() * 900000);
-
       user = new User({
         first_name,
         last_name: last_name || "",
         email: cleanEmail,
         mobile_number: cleanMobile,
         password,
-        user_type: 3,
-        is_verified: false,
-        otp,
-        otp_expires: otpExpires,
-        sql_id: newSqlId,
+        user_type: 3
       });
+      // OTP params explicitly set
+      user.otp = otp;
+      user.otp_expires = otpExpires;
     }
 
+    // Schema hook handles auto-generating sql_id, name, role mapping, and password hash
     await user.save();
 
-    // 1. Email
     try {
       await transporter.sendMail({
         from: process.env.MAIL_FROM,
@@ -109,11 +94,12 @@ exports.signupUser = async (req, res) => {
       status: "true",
       success: true,
       message: "OTP generated successfully. Check your email and mobile.",
-      data: { id: user._id.toString(),
-         userId: user._id.toString(),
-         sql_id: user.sql_id,
-          mobile_number: cleanMobile 
-        },
+      data: { 
+        id: user._id.toString(),
+        userId: user._id.toString(),
+        sql_id: user.sql_id,
+        mobile_number: cleanMobile 
+      },
     });
   } catch (error) {
     return res.status(500).json({ status: "false", success: false, message: error.message });
@@ -139,9 +125,11 @@ exports.verifyOtp = async (req, res) => {
     user.is_verified = true;
     user.otp = null;
     user.otp_expires = null;
-    const sqlId = await ensureUserSqlId(user);
+    
+    // Save to trigger schema hooks
+    await user.save();
 
-    const token = jwt.sign({ id: user._id, sql_id: sqlId }, process.env.JWT_SECRET, { expiresIn: "30d" });
+    const token = jwt.sign({ id: user._id, sql_id: user.sql_id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
     return res.status(200).json({
       status: "true",
@@ -149,10 +137,11 @@ exports.verifyOtp = async (req, res) => {
       message: "Account verified successfully!",
       token,
       data: {
-        userId: String(sqlId),
-        user_id: String(sqlId),
+        userId: String(user.sql_id),
+        user_id: String(user.sql_id),
         mongoId: user._id.toString(),
         accessToken: token,
+        access_token: token,
         first_name: user.first_name || "",
       },
     });
@@ -192,6 +181,187 @@ exports.resendOtp = async (req, res) => {
   }
 };
 
+// --- LOGIN ---
+exports.loginUser = async (req, res) => {
+  try {
+    const { mobile, password } = req.body;
+    const cleanMobile = mobile ? String(mobile).replace(/\D/g, "").slice(-10) : "";
+
+    if (!cleanMobile || !password) {
+      return res.status(400).json({ status: "false", success: false, message: "Mobile and password are required." });
+    }
+
+    const user = await User.findOne({ mobile_number: cleanMobile });
+
+    if (!user) {
+      return res.status(401).json({ status: "false", success: false, message: "User not found." });
+    }
+
+    if (!user.is_verified) {
+      return res.status(401).json({ status: "false", success: false, message: "Account unverified." });
+    }
+
+    const isMatch = await user.matchPassword(password);
+    if (!isMatch) {
+      return res.status(401).json({ status: "false", success: false, message: "Invalid credentials." });
+    }
+
+    const token = jwt.sign(
+      { id: user._id, sql_id: user.sql_id },
+      process.env.JWT_SECRET,
+      { expiresIn: "30d" }
+    );
+
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    return res.status(200).json({
+      status: "true",
+      success: true,
+      message: "Login Successful",
+      token,
+      data: {
+        userId: String(user.sql_id),
+        user_id: String(user.sql_id),
+        mongoId: user._id.toString(),
+        first_name: user.first_name || user.name || "",
+        last_name: user.last_name || "",
+        userType: user.user_type,
+        user_type: user.user_type,
+        accessToken: token,
+        access_token: token,
+        email: user.email || "",
+        profile_picture: getFullImageUrl(user.profile_picture || ""),
+      },
+      user: {
+        ...userResponse,
+        id: user._id,
+        name: user.name || `${user.first_name} ${user.last_name || ''}`.trim()
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ status: "false", success: false, message: error.message });
+  }
+};
+
+// --- PROFILE MANAGEMENT ---
+exports.getProfile = async (req, res) => {
+  try {
+    // Gracefully handle token payload location fallbacks from your AuthMiddleware
+    const searchId = req.user.id || req.user._id;
+
+    if (!searchId) {
+      return res.status(401).json({ status: "false", success: false, message: "Unauthorized token context context mapping error." });
+    }
+
+    const user = await User.findById(searchId).select("-password").lean();
+
+    if (!user) {
+      return res.status(404).json({ status: "false", success: false, message: "User not found" });
+    }
+
+    return res.status(200).json({
+      status: "true",
+      success: true,
+      message: "Profile retrieved successfully.",
+      data: {
+        user_id: user.sql_id || 0,
+        userId: user.sql_id || 0,
+        id: user._id.toString(),
+        mongo_id: user._id.toString(),
+        first_name: user.first_name || "",
+        firstName: user.first_name || "",
+        last_name: user.last_name || "",
+        lastName: user.last_name || "",
+        name: user.name || `${user.first_name} ${user.last_name || ''}`.trim(),
+        email: user.email || "",
+        mobile_number: user.mobile_number || "",
+        mobileNumber: user.mobile_number || "",
+        date_of_birth: user.date_of_birth || "",
+        dateOfBirth: user.date_of_birth || "",
+        gender: String(user.gender || "1"),
+        user_type: String(user.user_type || "3"),
+        userType: String(user.user_type || "3"),
+        role: user.role || "user",
+        profile_picture: user.profile_picture ? getFullImageUrl(user.profile_picture) : "",
+        profilePicture: user.profile_picture ? getFullImageUrl(user.profile_picture) : "",
+        banner_image: user.banner_image ? getFullImageUrl(user.banner_image) : "",
+        is_verified: user.is_verified || false
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ status: "false", success: false, message: error.message });
+  }
+};
+
+exports.updateProfile = async (req, res) => {
+  try {
+    const searchId = req.user.id || req.user._id;
+
+    if (!searchId) {
+      return res.status(401).json({ status: "false", success: false, message: "Unauthorized validation lookup error." });
+    }
+
+    // Fetch the target mutable user document model instance
+    const user = await User.findById(searchId);
+    if (!user) {
+      return res.status(404).json({ status: "false", success: false, message: "User profile records not found" });
+    }
+
+    const { first_name, last_name, email, mobile_number, date_of_birth, gender } = req.body;
+
+    // Apply fields safely directly on the document instance
+    if (first_name !== undefined) user.first_name = first_name;
+    if (last_name !== undefined) user.last_name = last_name;
+    if (email !== undefined) user.email = String(email).toLowerCase().trim();
+    if (date_of_birth !== undefined) user.date_of_birth = date_of_birth;
+    if (gender !== undefined) user.gender = String(gender);
+    
+    if (mobile_number !== undefined) {
+      user.mobile_number = String(mobile_number).replace(/\D/g, "").slice(-10);
+    }
+
+    // Handle incoming multipart form image fields
+    if (req.files) {
+        if (req.files.profile_picture && req.files.profile_picture.length > 0) {
+            user.profile_picture = req.files.profile_picture[0].path;
+        }
+        if (req.files.banner_image && req.files.banner_image.length > 0) {
+            user.banner_image = req.files.banner_image[0].path;
+        }
+    } else if (req.file) {
+        user.profile_picture = req.file.path;
+    }
+
+    // Save triggers the new pre-save hooks to automatically recalculate name & role mappings
+    await user.save();
+
+    return res.status(200).json({
+      status: "true",
+      success: true,
+      message: "Profile updated successfully.",
+      data: {
+        user_id: user.sql_id,
+        userId: user.sql_id,
+        id: user._id.toString(),
+        mongo_id: user._id.toString(),
+        first_name: user.first_name || "",
+        last_name: user.last_name || "",
+        email: user.email || "",
+        mobile_number: user.mobile_number || "",
+        date_of_birth: user.date_of_birth || "",
+        gender: String(user.gender || "1"),
+        user_type: String(user.user_type || "3"),
+        profile_picture: user.profile_picture ? getFullImageUrl(user.profile_picture) : "",
+        banner_image: user.banner_image ? getFullImageUrl(user.banner_image) : ""
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ status: "false", success: false, message: error.message });
+  }
+};
+
+// --- PASSWORD RECOVERY FLOWS ---
 exports.forgotPassword = async (req, res) => {
     try {
         const { email, mobile_number } = req.body;
@@ -203,18 +373,11 @@ exports.forgotPassword = async (req, res) => {
             const cleanMobile = String(mobile_number).replace(/\D/g, "").slice(-10);
             query = { mobile_number: new RegExp(cleanMobile + '$') }; 
         } else {
-            return res.status(400).json({ status: "false", message: "Email or Mobile is required." });
+            return res.status(400).json({ status: "false", message: "Email or Mobile identifier tracking input required." });
         }
 
         const user = await User.findOne(query);
-        
-        if (!user) {
-            return res.status(404).json({ 
-                status: "false", 
-                success: false, 
-                message: "No account found with this identifier." 
-            });
-        }
+        if (!user) return res.status(404).json({ status: "false", success: false, message: "No account matched." });
 
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
         user.otp = otp;
@@ -229,7 +392,7 @@ exports.forgotPassword = async (req, res) => {
                 html: `<h1>Your Reset Code: ${otp}</h1>`
             });
         } catch (mailErr) {
-            console.log(`❌ Mailer Error. Use this OTP: ${otp}`);
+            console.log(`❌ SMTP Mail engine delivery fallback loop warning. Use this OTP: ${otp}`);
         }
 
         res.status(200).json({ 
@@ -250,7 +413,6 @@ exports.forgotPassword = async (req, res) => {
 exports.forgotVerifyOtp = async (req, res) => {
     try {
         const { user_id, otp } = req.body;
-        
         const user = await User.findById(user_id);
 
         if (!user || user.otp !== otp || user.otp_expires < Date.now()) {
@@ -268,310 +430,48 @@ exports.forgotVerifyOtp = async (req, res) => {
     }
 };
 
-// --- LOGIN ---
-exports.loginUser = async (req, res) => {
-  try {
-    const { mobile, password } = req.body;
-    const cleanMobile = mobile ? String(mobile).replace(/\D/g, "").slice(-10) : "";
-
-    if (!cleanMobile || !password) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Mobile and password are required.",
-      });
-    }
-
-    const user = await User.findOne({ mobile_number: cleanMobile });
-
-    if (!user) {
-      return res.status(401).json({
-        status: "false",
-        success: false,
-        message: "User not found.",
-      });
-    }
-
-    if (!user.is_verified) {
-      return res.status(401).json({
-        status: "false",
-        success: false,
-        message: "Account unverified.",
-      });
-    }
-
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch) {
-      return res.status(401).json({
-        status: "false",
-        success: false,
-        message: "Invalid credentials.",
-      });
-    }
-
-    const sqlId = await ensureUserSqlId(user);
-
-    const token = jwt.sign(
-      { id: user._id, sql_id: sqlId },
-      process.env.JWT_SECRET,
-      { expiresIn: "30d" }
-    );
-
-    let userTypeInt = 3;
-    if (user.role === "admin") {
-      userTypeInt = 1;
-    } else if (user.role === "temple-admin") {
-      userTypeInt = 2;
-    }
-
-    const userResponse = user.toObject();
-    delete userResponse.password;
-
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "Login Successful",
-      token,
-      data: {
-        userId: String(sqlId),
-        user_id: String(sqlId),
-        mongoId: user._id.toString(),
-        first_name: user.first_name || user.name || "",
-        last_name: user.last_name || "",
-        userType: userTypeInt,
-        user_type: userTypeInt,
-        accessToken: token,
-        access_token: token,
-        accesstoken: token,
-        email: user.email || "",
-        profile_picture: getFullImageUrl(user.profile_picture || ""),
-      },
-      user: {
-        ...userResponse,
-        email: user.email || "",
-        name: user.first_name || user.name || "",
-        id: user._id,
-        sql_id: sqlId,
-        role: user.role,
-        user_type: userTypeInt,
-      },
-    });
-  } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// --- LOGOUT ---
-exports.logoutUser = async (req, res) => {
-  try {
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "Logged out successfully",
-      data: [],
-    });
-  } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-// --- PROFILE MANAGEMENT ---
-exports.getProfile = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select("-password").lean();
-
-    if (!user) {
-      return res.status(404).json({
-        status: "false",
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const formattedData = {
-      user_id: user.sql_id || 0,
-      mongo_id: String(user._id || ""),
-      first_name: String(user.first_name || ""),
-      last_name: String(user.last_name || ""),
-      email: String(user.email || ""),
-      mobile_number: user.mobile_number ? String(user.mobile_number) : "",
-      date_of_birth: user.date_of_birth ? String(user.date_of_birth) : "",
-      gender: user.gender !== undefined ? String(user.gender) : "1",
-      user_type: user.user_type !== undefined ? String(user.user_type) : "3",
-      profile_picture: user.profile_picture ? getFullImageUrl(user.profile_picture) : "",
-      profile_picture_thumb: user.profile_picture ? getFullImageUrl(user.profile_picture) : "",
-      banner_image: user.banner_image ? getFullImageUrl(user.banner_image) : "" // 🎯 Added Banner to response
-    };
-
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "Profile retrieved successfully.",
-      data: formattedData,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
-exports.updateProfile = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    // 👉 ADD THIS LINE TO DEBUG:
-    console.log("FILES RECEIVED BY BACKEND:", req.files);
-    const {
-      first_name,
-      last_name,
-      email,
-      mobile_number,
-      date_of_birth,
-      gender,
-    } = req.body;
-
-    const updateData = {
-      ...(first_name !== undefined ? { first_name } : {}),
-      ...(last_name !== undefined ? { last_name } : {}),
-      ...(email !== undefined ? { email: String(email).toLowerCase().trim() } : {}),
-      ...(mobile_number !== undefined
-        ? { mobile_number: String(mobile_number).replace(/\D/g, "").slice(-10) }
-        : {}),
-      ...(date_of_birth !== undefined ? { date_of_birth } : {}),
-      ...(gender !== undefined ? { gender: String(gender) } : {}),
-    };
-
-    if (
-      updateData.first_name !== undefined ||
-      updateData.last_name !== undefined
-    ) {
-      const first = updateData.first_name ?? "";
-      const last = updateData.last_name ?? "";
-      updateData.name = `${first} ${last}`.trim();
-    }
-
-    // 🎯 THE FIX: Handle BOTH profile_picture AND banner_image properly here
-    if (req.files) {
-        if (req.files.profile_picture && req.files.profile_picture.length > 0) {
-            updateData.profile_picture = req.files.profile_picture[0].path;
-        }
-        if (req.files.banner_image && req.files.banner_image.length > 0) {
-            updateData.banner_image = req.files.banner_image[0].path;
-        }
-    } else if (req.file) {
-        updateData.profile_picture = req.file.path;
-    }
-
-    // 🎯 THE FIX: Replaced { new: true } with { returnDocument: 'after' }
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $set: updateData },
-      { returnDocument: 'after', runValidators: true }
-    ).lean();
-
-    if (!updatedUser) {
-      return res.status(404).json({
-        status: "false",
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const formattedData = {
-      user_id: updatedUser.sql_id || 0,
-      mongo_id: String(updatedUser._id || ""),
-      first_name: updatedUser.first_name || "",
-      last_name: updatedUser.last_name || "",
-      email: updatedUser.email || "",
-      mobile_number: String(updatedUser.mobile_number || ""),
-      date_of_birth: updatedUser.date_of_birth || "",
-      gender: String(updatedUser.gender || "1"),
-      user_type: String(updatedUser.user_type || "3"),
-      profile_picture: updatedUser.profile_picture ? getFullImageUrl(updatedUser.profile_picture) : "",
-      profile_picture_thumb: updatedUser.profile_picture ? getFullImageUrl(updatedUser.profile_picture) : "",
-      banner_image: updatedUser.banner_image ? getFullImageUrl(updatedUser.banner_image) : "" // 🎯 Ensure banner updates in React State
-    };
-
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "Profile updated successfully.",
-      data: formattedData,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
-  }
-};
-
 exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, new_password } = req.body;
 
     if (!email || !otp || !new_password) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Email, OTP and new password are required.",
-      });
+      return res.status(400).json({ status: "false", success: false, message: "Email, OTP and new password variables required." });
     }
 
     const cleanEmail = String(email).toLowerCase().trim();
     const user = await User.findOne({ email: cleanEmail, otp });
 
     if (!user || !user.otp_expires || new Date() > user.otp_expires) {
-      return res.status(400).json({
-        status: "false",
-        success: false,
-        message: "Invalid/Expired OTP",
-      });
+      return res.status(400).json({ status: "false", success: false, message: "Invalid/Expired OTP parameters handled." });
     }
 
-    user.password = new_password;
+    user.password = new_password; // Plain pass reassignment here accurately gets rehashed by schema hooks
     user.otp = null;
     user.otp_expires = null;
     await user.save();
 
-    return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "Password updated!",
-    });
+    return res.status(200).json({ status: "true", success: true, message: "Password updated successfully!" });
   } catch (error) {
-    return res.status(500).json({
-      status: "false",
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ status: "false", success: false, message: error.message });
   }
 };
 
-// --- ADMIN CRUD OPS ---
+// --- LOGOUT ---
+exports.logoutUser = async (req, res) => {
+  try {
+    return res.status(200).json({ status: "true", success: true, message: "Logged out successfully", data: [] });
+  } catch (error) {
+    return res.status(500).json({ status: "false", success: false, message: error.message });
+  }
+};
+
+// --- ADMIN SYSTEM ENDPOINTS ---
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find()
-      .sort({ created_at: -1 })
-      .select("-password");
-
+    const users = await User.find().sort({ created_at: -1 }).select("-password");
     return res.status(200).json(users);
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -580,116 +480,44 @@ exports.getUserById = async (req, res) => {
     const user = await User.findById(req.params.id).select("-password");
     return res.status(200).json(user);
   } catch (error) {
-    return res.status(500).json({
-      message: error.message,
-    });
+    return res.status(500).json({ message: error.message });
   }
 };
 
 exports.updateUser = async (req, res) => {
   try {
-    const updateData = { ...req.body };
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: "User metrics data not found" });
 
-    // 🎯 THE FIX: Handle Admin image uploads too
+    const updateData = { ...req.body };
+    Object.assign(user, updateData);
+
     if (req.files) {
-        if (req.files.profile_picture) updateData.profile_picture = req.files.profile_picture[0].path;
-        if (req.files.banner_image) updateData.banner_image = req.files.banner_image[0].path;
+        if (req.files.profile_picture) user.profile_picture = req.files.profile_picture[0].path;
+        if (req.files.banner_image) user.banner_image = req.files.banner_image[0].path;
     } else if (req.file) {
-        updateData.profile_picture = req.file.path;
+        user.profile_picture = req.file.path;
     }
 
-    // 🎯 THE FIX: Replaced { new: true } with { returnDocument: 'after' } and passed updateData
-    const updatedUser = await User.findByIdAndUpdate(
-      req.params.id,
-      { $set: updateData },
-      { returnDocument: 'after', runValidators: true }
-    ).select("-password");
-
-    return res.status(200).json({
-      success: true,
-      message: "User Updated!",
-      data: updatedUser,
-    });
+    await user.save();
+    return res.status(200).json({ success: true, message: "User Updated!", data: user });
   } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(400).json({ success: false, message: error.message });
   }
 };
 
 exports.deleteUser = async (req, res) => {
   try {
     await User.findByIdAndDelete(req.params.id);
-    return res.status(200).json({
-      success: true,
-      message: "User Deleted",
-    });
+    return res.status(200).json({ success: true, message: "User Deleted Successfully" });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Delete failed",
-    });
+    return res.status(500).json({ success: false, message: "Delete action execution failed" });
   }
 };
 
-// --- SQL DATA FETCHING ---
-exports.getAllRituals = async (req, res) => {
-  try {
-    const [rows] = await db.execute(
-      "SELECT * FROM rituals WHERE status = 'active' OR status = '1'"
-    );
-    return res.status(200).json({
-      success: true,
-      data: rows,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Error: " + error.message,
-    });
-  }
-};
-
-exports.getMembershipPlans = async (req, res) => {
-  try {
-    const [rows] = await db.execute(
-      "SELECT * FROM membership_cards WHERE status = 'active' OR status = '1'"
-    );
-    return res.status(200).json({
-      success: true,
-      data: rows,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Error: " + error.message,
-    });
-  }
-};
-
-exports.getAssistantsByTemple = async (req, res) => {
-  try {
-    const { templeId } = req.params;
-    const [rows] = await db.execute(
-      "SELECT * FROM temple_assistants WHERE temple_id = ?",
-      [templeId]
-    );
-
-    return res.status(200).json({
-      success: true,
-      data: rows,
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Error: " + error.message,
-    });
-  }
-};
-
-exports.bookRitual = async (req, res) =>
-  res.status(200).json({ success: true, message: "Booking received!" });
-
-exports.purchaseMembership = async (req, res) =>
-  res.status(200).json({ success: true, message: "Purchase successful!" });
+// --- STUB ROUTE CONTROLLERS RETAINED FOR ROUTER CONTINUITY MAPS ---
+exports.getAllRituals = async (req, res) => res.status(200).json({ success: true, data: [] });
+exports.getMembershipPlans = async (req, res) => res.status(200).json({ success: true, data: [] });
+exports.getAssistantsByTemple = async (req, res) => res.status(200).json({ success: true, data: [] });
+exports.bookRitual = async (req, res) => res.status(200).json({ success: true, message: "Booking received!" });
+exports.purchaseMembership = async (req, res) => res.status(200).json({ success: true, message: "Purchase successful!" });s
