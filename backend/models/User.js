@@ -16,7 +16,7 @@ const userSchema = new mongoose.Schema({
     otp: { type: String, default: null },
     otp_expires: { type: Date, default: null },
 
-    // 🎯 NEW FIELDS ADDED: Required for Flutter & React Profile Sync
+    // 🎯 NEW FIELDS: Required for Flutter & React Profile Sync
     date_of_birth: { type: String, trim: true, default: "" }, 
     gender: { type: String, enum: ["1", "2", "3"], default: "1" }, // 1:Male, 2:Female, 3:Other
     profile_picture: { type: String, default: "" },
@@ -30,8 +30,8 @@ userSchema.methods.matchPassword = async function(enteredPassword) {
     return await bcrypt.compare(enteredPassword, this.password);
 };
 
-// --- PRE-SAVE HOOK ---
-userSchema.pre('save', async function(next) {
+// --- PRE-SAVE HOOK (FIXED BY REMOVING LEGACY NEXT CALLBACK MIXING) ---
+userSchema.pre('save', async function() {
     // Ensure sql_id is NEVER null or empty for the Flutter C: Drive project
     if (!this.sql_id || this.sql_id === 0) {
         this.sql_id = Math.floor(100000 + Math.random() * 900000);
@@ -54,8 +54,7 @@ userSchema.pre('save', async function(next) {
             this.password = await bcrypt.hash(this.password, salt);
         }
     }
-    
-    next();
+    // 🎯 Note: No next() call is needed here. Returning finishes the hook naturally.
 });
 
 module.exports = mongoose.models.User || mongoose.model('User', userSchema, 'users');
