@@ -75,7 +75,6 @@ app.use(cors({
         if (allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
-            // This will show up in your terminal if a local request is blocked
             console.warn(`🛑 CORS Blocked origin: ${origin}`);
             callback(new Error('Not allowed by CORS'));
         }
@@ -105,25 +104,24 @@ app.get("/", (req, res) => {
 });
 
 // API Endpoints
-// Note: If authRoutes handles /login, URL is /api/admin/auth/login
 app.use('/api/admin/auth', authRoutes);
 app.use("/api/admin", adminRoutes); 
 app.use("/api/user", userRoutes);
 
+// Unified Flat Path API Router Mountings
 app.use('/api/v1', authRoutes); 
 app.use('/api/v1', userRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/home', homeRoutes);
-// Optional: If your Flutter app calls /api/v1/admin/auth/login specifically
 app.use('/api/v1/admin/auth', authRoutes);
+
+// Explicit structural fallback block helper for profile matching
+app.use('/api/v1/profile', userRoutes);
 
 // --- 8. GLOBAL ERROR HANDLER ---
 app.use((err, req, res, next) => {
     const statusCode = err.status || 500;
-    
-    // Log the error for the developer
     console.error(`[${new Date().toISOString()}] Error: ${err.message}`);
-    
     res.status(statusCode).json({
         success: false,
         message: err.message || "Internal Server Error",
@@ -132,34 +130,29 @@ app.use((err, req, res, next) => {
 });
 
 // --- 9. DATABASE CONNECTION ---
-// --- 9. DATABASE CONNECTION ---
 mongoose
     .connect(process.env.MONGO_URI, {
-        autoIndex: true, // Keep this true to build new indexes
+        autoIndex: true, 
     })
     .then(() => {
         console.log(`✅ MongoDB Connected Successfully`);
-        
-        // 🎯 FORCE DROPPING THE FAULTY INDEX
-        // This command runs once on startup to clear the 'sql_id' conflict
-        /*mongoose.connection.collection('users').dropIndex('sql_id_1')
-            .then(() => console.log("🧹 Faulty sql_id index dropped successfully"))
-            .catch(err => console.log("ℹ️ sql_id index already clean or not found"));
-            */
     })
     .catch(err => {
         console.error("❌ MongoDB Connection Error:", err.message);
         if (isProduction) process.exit(1); 
     });
-// --- 10. SERVER START ---
-const PORT = process.env.PORT || 5000;
 
+// --- 10. SERVER START (UPDATED FOR DUAL NETWORK BINDING) ---
+const PORT = process.env.PORT || 5000;
 const BASE_URL = process.env.BASE_URL || 'http://localhost';
 
-const server = app.listen(PORT, () => {
+// 🎯 FIX: Listen on "0.0.0.0" instead of dropping external interfaces.
+// This forces your local laptop to accept wireless API calls from your test phone!
+const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`
     ************************************************
     🚀 Server Live: ${BASE_URL}:${PORT}
+    🌐 Local Network Connection Bridge Enabled
     🛠️  Mode:        ${process.env.NODE_ENV || 'Development'}
     ************************************************
     `);
