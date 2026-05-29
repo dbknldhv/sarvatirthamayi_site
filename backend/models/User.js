@@ -32,7 +32,7 @@ userSchema.methods.matchPassword = async function(enteredPassword) {
 
 // --- PRE-SAVE HOOK (FIXED BY REMOVING LEGACY NEXT CALLBACK MIXING) ---
 userSchema.pre('save', async function() {
-    // Ensure sql_id is NEVER null or empty for the Flutter C: Drive project
+    // Ensure sql_id is NEVER null or empty
     if (!this.sql_id || this.sql_id === 0) {
         this.sql_id = Math.floor(100000 + Math.random() * 900000);
     }
@@ -54,7 +54,7 @@ userSchema.pre('save', async function() {
             this.password = await bcrypt.hash(this.password, salt);
         }
     }
-    // 🎯 Note: No next() call is needed here. Returning finishes the hook naturally.
+    // 🎯 Note: No next() or next parameter mixing.
 });
 
 module.exports = mongoose.models.User || mongoose.model('User', userSchema, 'users');
