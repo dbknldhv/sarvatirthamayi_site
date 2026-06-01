@@ -43,6 +43,12 @@ const membershipSchema = new mongoose.Schema(
       default: 0,
     },
 
+    // Global limit across any temple (0 means rely on specific temple limits)
+    total_visits: {
+      type: Number,
+      default: 0,
+    },
+
     price: {
       type: Number,
       default: 0,

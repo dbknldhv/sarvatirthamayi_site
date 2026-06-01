@@ -1,31 +1,17 @@
 const User = require("../../models/User");
 const jwt = require("jsonwebtoken");
-const nodemailer = require("nodemailer");
-const { sendSMS } = require("../../utils/smsProvider"); 
+const mailSender = require("../../utils/mailSender"); // Ensure path is correct
+const { sendSMS } = require("../../utils/smsProvider");
 
-// --- HELPER: FORMAT FILE SYSTEM PATHS TO FULL PUBLIC WEB URLS ---
+// --- HELPER: FORMAT FILE SYSTEM PATHS ---
 const getFullImageUrl = (path) => {
   if (!path) return "";
   if (path.startsWith("http")) return path;
-  
   const baseUrl = process.env.NODE_ENV === 'production' 
     ? "https://api.sarvatirthamayi.com" 
     : "http://localhost:5000";
-
   return `${baseUrl}/${path.replace(/\\/g, "/")}`;
 };
-
-// --- NODEMAILER SMTP ENGINE TRANSPORT ---
-const transporter = nodemailer.createTransport({
-  host: process.env.MAIL_HOST,
-  port: parseInt(process.env.MAIL_PORT, 10) || 465,
-  secure: true,
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS,
-  },
-  tls: { rejectUnauthorized: false },
-});
 
 // --- AUTHENTICATION: SIGNUP & SEND OTP ---
 exports.signupUser = async (req, res) => {
@@ -58,12 +44,8 @@ exports.signupUser = async (req, res) => {
       user.mobile_number = cleanMobile;
     } else {
       user = new User({
-        first_name,
-        last_name: last_name || "",
-        email: cleanEmail,
-        mobile_number: cleanMobile,
-        password,
-        user_type: 3
+        first_name, last_name: last_name || "", email: cleanEmail,
+        mobile_number: cleanMobile, password, user_type: 3
       });
       user.otp = otp;
       user.otp_expires = otpExpires;
@@ -71,33 +53,20 @@ exports.signupUser = async (req, res) => {
 
     await user.save();
 
+    // OTP DELIVERY
     try {
-      await transporter.sendMail({
-        from: process.env.MAIL_FROM,
-        to: cleanEmail,
-        subject: "Verify Your Account - STM Club",
-        html: `<h1>Your Verification Code is: ${otp}</h1>`,
-      });
-    } catch (mailError) {
-      console.error("❌ SMTP Error:", mailError.message);
-    }
-
-    try {
+      await mailSender(cleanEmail, "Verify Your Account - STM Club", `<h1>Your Verification Code is: ${otp}</h1>`);
+      
+      if (process.env.ENABLE_SMS === 'true' && process.env.TWILIO_ACCOUNT_SID) {
         await sendSMS(cleanMobile, otp);
-    } catch (smsError) {
-        console.error("❌ SMS Error:", smsError.message);
+      }
+    } catch (err) {
+      console.error("OTP Delivery Error:", err.message);
     }
 
     return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "OTP generated successfully. Check your email and mobile.",
-      data: { 
-        id: user._id.toString(),
-        userId: user._id.toString(),
-        sql_id: user.sql_id,
-        mobile_number: cleanMobile 
-      },
+      status: "true", success: true, message: "OTP generated successfully.",
+      data: { id: user._id.toString(), userId: user._id.toString(), sql_id: user.sql_id, mobile_number: cleanMobile }
     });
   } catch (error) {
     return res.status(500).json({ status: "false", success: false, message: error.message });
@@ -109,43 +78,35 @@ exports.verifyOtp = async (req, res) => {
   try {
     const { mobile_number, otp } = req.body;
     if (!mobile_number || !otp) {
-      return res.status(400).json({ status: "false", success: false, message: "Mobile number and OTP are required." });
+      return res.status(400).json({ status: "false", success: false, message: "Required fields missing." });
     }
 
     const cleanMobile = String(mobile_number).replace(/\D/g, "").slice(-10);
     const user = await User.findOne({ mobile_number: cleanMobile, otp });
 
     if (!user) return res.status(400).json({ status: "false", success: false, message: "Invalid code." });
-    if (!user.otp_expires || new Date() > user.otp_expires) {
-      return res.status(400).json({ status: "false", success: false, message: "Code expired." });
-    }
+    if (new Date() > user.otp_expires) return res.status(400).json({ status: "false", success: false, message: "Code expired." });
 
     user.is_verified = true;
     user.otp = null;
-    user.otp_expires = null;
-    
     await user.save();
 
-    const token = jwt.sign({ id: user._id, sql_id: user.sql_id }, process.env.JWT_SECRET, { expiresIn: "30d" });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "30d" });
 
     return res.status(200).json({
-      status: "true",
-      success: true,
-      message: "Account verified successfully!",
-      token,
+      status: "true", success: true, message: "Account verified!", token,
       data: {
-        userId: String(user.sql_id),
-        user_id: String(user.sql_id),
-        mongoId: user._id.toString(),
+        id: user._id.toString(),
+        userId: user._id.toString(),
+        sql_id: user.sql_id || 0,
         accessToken: token,
-        access_token: token,
-        first_name: user.first_name || "",
       },
     });
   } catch (error) {
     return res.status(500).json({ status: "false", success: false, message: error.message });
   }
 };
+
 
 // --- RESEND OTP ---
 exports.resendOtp = async (req, res) => {

@@ -14,19 +14,17 @@ exports.getTemplesList = async (req, res) => {
     }
 };
 
+/**
+ * 2. Get All Memberships (Admin)
+ */
 exports.getAllMemberships = async (req, res) => {
     try {
         const memberships = await Membership.find()
             .sort({ created_at: -1 })
             .lean();
-
         return res.status(200).json(memberships);
     } catch (error) {
-        console.error("Error fetching memberships:", error);
-        return res.status(500).json({
-            message: "Error fetching memberships",
-            error: error.message,
-        });
+        res.status(500).json({ message: "Error fetching memberships", error: error.message });
     }
 };
 
@@ -36,7 +34,7 @@ exports.getAllMemberships = async (req, res) => {
 exports.getMembershipById = async (req, res) => {
     try {
         const membership = await Membership.findById(req.params.id)
-            .populate("temples.templeId", "name");
+            .populate("temples.temple_id", "name"); // 🎯 FIX: Matches your schema's 'temple_id'
             
         if (!membership) return res.status(404).json({ message: "Membership not found" });
         res.status(200).json(membership);
@@ -47,68 +45,59 @@ exports.getMembershipById = async (req, res) => {
 
 /**
  * 4. Update/Edit an existing membership
- * Handles mapping from Frontend payload to Mongoose Schema
  */
 exports.updateMembership = async (req, res) => {
     try {
         const { id } = req.params;
         const data = req.body;
 
-        // 1. Prepare and Sanitize Data
         const updateData = {
             name: data.name,
             description: data.description,
             price: Number(data.price),
             duration: Number(data.duration),
             visits: Number(data.visits),
-            // Convert String labels (Active/Months) to Schema Numbers if necessary
+            total_visits: Number(data.total_visits || 0), // 🎯 FIX: Added the new global limit
+            
             status: data.status === "Active" ? 1 : (data.status === "Inactive" ? 0 : Number(data.status)),
             duration_type: data.duration_type === "Months" ? 1 : (data.duration_type === "Years" ? 2 : Number(data.duration_type)),
             
-            // 2. Map the temples array to match the Schema key 'temples'
-            // This converts frontend 'selectedTemples' into the format the DB expects
             temples: (data.selectedTemples || data.temples || []).map(t => ({
-                templeId: t.templeId || t._id,
-                name: t.name,
-                maxVisits: Number(t.maxVisits || 1)
+                temple_id: t.temple_id || t.templeId || t._id, // 🎯 FIX: Safe fallback mapping
+                temple_name: t.name || t.temple_name,
+                max_visits: Number(t.max_visits || t.maxVisits || 1)
             }))
         };
 
-        // 3. Execute Update
         const updatedCard = await Membership.findByIdAndUpdate(
             id, 
-            { $set: updateData }, // $set ensures we overwrite the fields explicitly
-            { new: true, runValidators: true }
-        ).populate("temples.templeId", "name");
+            { $set: updateData }, 
+            { returnDocument: 'after', runValidators: true } // 🎯 FIX: Mongoose Deprecation Warning
+        ).populate("temples.temple_id", "name");
 
         if (!updatedCard) {
             return res.status(404).json({ message: "Membership card not found" });
         }
 
-        res.status(200).json({ 
-            message: "Membership Card Updated Successfully!", 
-            data: updatedCard 
-        });
+        res.status(200).json({ message: "Membership Card Updated Successfully!", data: updatedCard });
     } catch (error) {
-        console.error("Update Error:", error);
         res.status(400).json({ message: "Update failed", error: error.message });
     }
 };
 
+/**
+ * 5. Create new membership
+ */
 exports.createMembership = async (req, res) => {
     try {
-        console.log("Data received by Backend:", req.body); // Check your terminal!
         const newCard = new Membership(req.body);
         await newCard.save();
         res.status(201).json({ message: "Created Successfully!", data: newCard });
     } catch (error) {
-        console.error("DETAILED VALIDATION ERROR:", error.errors); // This tells us the exact field
-        res.status(400).json({ 
-            message: "Validation Failed", 
-            details: error.message 
-        });
+        res.status(400).json({ message: "Validation Failed", details: error.message });
     }
 };
+
 /**
  * 6. Delete a membership card
  */

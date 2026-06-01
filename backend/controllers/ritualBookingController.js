@@ -4,28 +4,18 @@
  */
 
 const RitualBooking = require("../models/RitualBooking");
+const mongoose = require("mongoose");
 
 /**
  * 1. Get All Ritual Bookings
- * Fetches every ritual booking in the system with full details for the admin table.
- * Sorted by creation date (newest first).
  */
 exports.getAllRitualBookings = async (req, res) => {
     try {
         const bookings = await RitualBooking.find()
-            // Populate User info (Adjusted fields based on your latest User model)
             .populate("user_id", "name email mobile_number first_name last_name")
-            
-            // Populate Temple info including the city
             .populate("temple_id", "name city_name")
-            
-            // Populate Ritual name and Type
             .populate("ritual_id", "name type")
-            
-            // Populate Package details to see the selected price point
             .populate("ritual_package_id", "name price")
-            
-            // Sort by creation date - newest bookings appear at the top
             .sort({ created_at: -1 });
 
         res.status(200).json({ 
@@ -44,18 +34,29 @@ exports.getAllRitualBookings = async (req, res) => {
 
 /**
  * 2. Get Single Ritual Booking Details
- * Fetches the deep-populated data for a specific booking ID.
- * Typically used for the "View Details" modal or specific edit page in Admin.
  */
 exports.getRitualBookingById = async (req, res) => {
     try {
         const { id } = req.params;
+        let booking;
 
-        const booking = await RitualBooking.findById(id)
-            .populate("user_id") // Full user profile
-            .populate("temple_id") // Full temple details
-            .populate("ritual_id") // Full ritual details
-            .populate("ritual_package_id"); // Full package details (price, duration, etc.)
+        // Try Object ID first
+        if (mongoose.Types.ObjectId.isValid(id)) {
+            booking = await RitualBooking.findById(id)
+                .populate("user_id") 
+                .populate("temple_id") 
+                .populate("ritual_id") 
+                .populate("ritual_package_id");
+        }
+        
+        // Fallback to SQL ID for legacy data
+        if (!booking && !isNaN(id)) {
+            booking = await RitualBooking.findOne({ sql_id: Number(id) })
+                .populate("user_id") 
+                .populate("temple_id") 
+                .populate("ritual_id") 
+                .populate("ritual_package_id");
+        }
             
         if (!booking) {
             return res.status(404).json({ 
@@ -78,22 +79,29 @@ exports.getRitualBookingById = async (req, res) => {
 };
 
 /**
- * 3. Update Ritual Booking Status (Recommended addition for Admin)
- * Allows Admin to confirm completion or cancel a booking.
+ * 3. Update Ritual Booking Status
  */
 exports.updateRitualBookingStatus = async (req, res) => {
     try {
         const { id } = req.params;
         const { booking_status, payment_status } = req.body;
+        let updateTargetId = id;
+
+        // If the ID passed isn't a mongoose ID, we must find the internal _id first
+        if (!mongoose.Types.ObjectId.isValid(id) && !isNaN(id)) {
+            const existingBooking = await RitualBooking.findOne({ sql_id: Number(id) });
+            if (!existingBooking) return res.status(404).json({ success: false, message: "Booking not found" });
+            updateTargetId = existingBooking._id;
+        }
 
         const updatedBooking = await RitualBooking.findByIdAndUpdate(
-            id,
+            updateTargetId,
             { 
                 booking_status, 
                 payment_status,
                 updated_at: Date.now() 
             },
-            { new: true }
+            { returnDocument: 'after', runValidators: true } // ✅ Fixed Deprecation Warning
         );
 
         if (!updatedBooking) {

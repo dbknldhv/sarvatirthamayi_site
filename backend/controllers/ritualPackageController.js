@@ -13,8 +13,8 @@ exports.getRitualPackages = async (req, res) => {
       .populate("ritual_id", "name")
       .populate("temple_id", "name")
       .sort({ created_at: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit));
 
     const total = await RitualPackage.countDocuments(query);
 
@@ -35,11 +35,15 @@ exports.getRitualPackageById = async (req, res) => {
 
     if (mongoose.Types.ObjectId.isValid(id)) {
       ritualPackage = await RitualPackage.findById(id).populate("ritual_id temple_id");
-    } else {
-      ritualPackage = await RitualPackage.findOne({ sql_id: id }).populate("ritual_id temple_id");
+    } 
+    
+    // Fallback for migrated SQL IDs
+    if (!ritualPackage && !isNaN(id)) {
+      ritualPackage = await RitualPackage.findOne({ sql_id: Number(id) }).populate("ritual_id temple_id");
     }
 
     if (!ritualPackage) return res.status(404).json({ success: false, message: "Package not found" });
+    
     res.status(200).json({ success: true, data: ritualPackage });
   } catch (error) {
     res.status(500).json({ success: false, message: "Server Error" });
@@ -57,7 +61,11 @@ exports.createRitualPackage = async (req, res) => {
 
 exports.updateRitualPackage = async (req, res) => {
   try {
-    const updated = await RitualPackage.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const updated = await RitualPackage.findByIdAndUpdate(
+      req.params.id, 
+      req.body, 
+      { returnDocument: 'after', runValidators: true } // ✅ Fixed Deprecation Warning
+    );
     res.status(200).json({ success: true, data: updated });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });

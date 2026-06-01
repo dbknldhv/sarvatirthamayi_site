@@ -100,7 +100,7 @@ exports.updateTempleBookingStatus = async (req, res) => {
     const updatedBooking = await TempleBooking.findByIdAndUpdate(
       req.params.id,
       { booking_status: Number(booking_status), updated_at: new Date() },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     if (!updatedBooking) {

@@ -18,10 +18,11 @@ exports.sendSMS = async (mobileNumber, otp) => {
   try {
     const client = new twilio(sid, token);
     
-    // Format number to +91 (India) for Twilio compatibility
+    const countryCode = process.env.COUNTRY_CODE || "+91";
     let formattedNumber = String(mobileNumber).replace(/\D/g, "").slice(-10);
-    formattedNumber = `+91${formattedNumber}`;
-
+    
+    // 🎯 USE THE VARIABLE HERE
+    formattedNumber = `${countryCode}${formattedNumber}`;
     const response = await client.messages.create({
       body: `Your STM Club verification code is: ${otp}. Valid for 10 minutes.`,
       from: from,

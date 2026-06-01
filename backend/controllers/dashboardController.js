@@ -1,10 +1,12 @@
-// ✅ FIX: Changed "../../" to "../" to correctly locate the models folder
+// controllers/dashboardController.js
+
 const User = require("../models/User");
 const Temple = require("../models/Temple");
 const Membership = require("../models/Membership");
 const Voucher = require("../models/Voucher");
 const TempleBooking = require("../models/TempleBooking");
 const RitualBooking = require("../models/RitualBooking");
+const Setting = require("../models/Setting"); // 🎯 FIX: Added Setting model import
 
 /**
  * @desc    Get Comprehensive Admin Dashboard Metrics
@@ -70,7 +72,6 @@ exports.getDashboardStats = async (req, res) => {
  * @desc    Update Global Discount Settings
  * @route   PUT /api/admin/settings/global-discount
  * @access  Private (Admin Only)
- * ✅ FIX: Added this function so adminRoutes.js works correctly
  */
 exports.updateGlobalSettings = async (req, res) => {
     try {
@@ -80,13 +81,25 @@ exports.updateGlobalSettings = async (req, res) => {
             return res.status(400).json({ success: false, message: "Discount rate is required" });
         }
 
-        // Here you would typically save to a 'Settings' model or Config file.
-        // For now, we return success to allow the UI to function.
+        // 1. Look for the settings document (there should only ever be one)
+        let settings = await Setting.findOne();
+
+        // 2. If it doesn't exist yet (first time running), create it
+        if (!settings) {
+            settings = await Setting.create({ ritualDiscountRate });
+        } else {
+            // 3. If it exists, update it and save
+            settings.ritualDiscountRate = ritualDiscountRate;
+            await settings.save();
+        }
+
         res.status(200).json({
             success: true,
-            message: `Global Membership Discount updated to ${ritualDiscountRate}%`
+            message: `Global Membership Discount permanently updated to ${ritualDiscountRate}%`,
+            data: settings
         });
     } catch (error) {
+        console.error("Settings Update Error:", error);
         res.status(500).json({ success: false, message: error.message });
     }
 };

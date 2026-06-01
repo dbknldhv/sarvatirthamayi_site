@@ -164,7 +164,7 @@ exports.updateRitual = async (req, res) => {
         const updated = await Ritual.findByIdAndUpdate(
             ritual._id, 
             updateData, 
-            { new: true, runValidators: true }
+            { returnDocument: 'after', runValidators: true }
         );
 
         res.status(200).json({ success: true, data: updated });

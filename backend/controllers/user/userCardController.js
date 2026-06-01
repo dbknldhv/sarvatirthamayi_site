@@ -1,13 +1,14 @@
-// controllers/userCardController.js
-const PurchasedMemberCard = require('../models/PurchasedMemberCard');
-const Temple = require('../models/Temple');
+// backend/controllers/user/userCardController.js
+const PurchasedMemberCard = require('../../models/PurchasedMemberCard');
+const Temple = require('../../models/Temple');
 
 exports.getMyCard = async (req, res) => {
   try {
-    // 1. Fetch the card and populate the basic membership info
+    // 🎯 FIX: Changed query parameter filter lookup from sql_id back to req.user.id
+    // to match Mongoose's expected 24-character ObjectId pattern allocation mapping.
     const card = await PurchasedMemberCard.findOne({ 
       user_id: req.user.id, 
-      payment_status: 1 // Only fetch if payment is successful
+      payment_status: 1 
     }).populate('membership_card_id');
 
     if (!card) {
@@ -17,25 +18,26 @@ exports.getMyCard = async (req, res) => {
       });
     }
 
-    // 2. Fetch the Temple objects for the user's 5 favorite names
-    // This gives us access to the images for the digital card UI
+    // Safely extract raw object layers to protect against serialization spreads crashing
+    const rawCardData = card.toObject ? card.toObject() : (card._doc || card);
+
     const templeDetails = await Temple.find({
-      name: { $in: card.favorite_temples }
+      name: { $in: rawCardData.favorite_temples || [] }
     }).select('name image location');
 
-    // 3. Return the merged data
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       data: {
-        ...card._doc,
-        templeDetails // Array of full Temple objects
+        ...rawCardData,
+        templeDetails 
       }
     });
   } catch (error) {
-    console.error("Error fetching member card:", error);
-    res.status(500).json({ 
+    console.error("🔥 Error inside getMyCard:", error);
+    return res.status(500).json({ 
       success: false, 
-      message: "Internal server error" 
+      message: "Internal server error",
+      error: error.message 
     });
   }
 };

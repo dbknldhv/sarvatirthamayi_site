@@ -4,20 +4,13 @@ const multer = require("multer");
 const path = require("path");
 
 // 🛡️ Middlewares
-const { protect, adminOnly } = require("../middleware/authMiddleware");
+const { protect, authorize } = require("../middleware/authMiddleware");
 
 // 🎮 Controller Imports
 const dashboardController = require("../controllers/dashboardController");
 const cityController = require('../controllers/cityController');
 const countryController = require('../controllers/countryController');
 const authController = require("../controllers/auth.controller");
-
-/**
- * 🎯 FIX 1: Corrected path for userController
- * Based on your folder structure: D:\stm-mern\backend\controllers\user\userController.js
- */
-//const userController = require("../controllers/user/userController");
-
 const ritualTypeController = require("../controllers/ritualTypeController");
 const ritualBookingController = require("../controllers/ritualBookingController");
 const ritualPackageController = require("../controllers/ritualPackageController");
@@ -55,16 +48,12 @@ router.get('/countries', countryController.getCountries);
 
 // --- 3. PROTECTED ADMIN ROUTES ---
 router.use(protect); 
-//router.use(adminOnly);
 
 // --- Dashboard & Global Control ---
 router.get("/dashboard-stats", dashboardController.getDashboardStats);
 router.put("/settings/global-discount", dashboardController.updateGlobalSettings);
 
 // --- User Management ---
-/**
- * 🎯 FIX 2: These routes will now work because userController is correctly imported above
- */
 router.get("/users", userController.getAllUsers);
 router.get("/users/:id", userController.getUserById);
 router.put("/users/update/:id", userController.updateUser);
@@ -79,20 +68,33 @@ router.delete("/temples/:id", templeController.deleteTemple);
 
 // --- Temple Bookings ---
 router.get("/temple-bookings", templeBookingController.getAllTempleBookings);
+router.get("/temple-bookings/:id", templeBookingController.getTempleBookingById);
 router.put("/temple-bookings/status/:id", templeBookingController.updateTempleBookingStatus);
-
 // --- Membership Management ---
 router.get("/memberships", membershipController.getAllMemberships);
+
+// 🎯 FIX: Added missing temples list route (MUST be above /:id)
+router.get("/memberships/temples-list", membershipController.getTemplesList);
+
+// 🎯 FIX: Added missing get by ID route
+router.get("/memberships/:id", membershipController.getMembershipById);
+
 router.post("/memberships/create", membershipController.createMembership);
 router.put("/memberships/update/:id", membershipController.updateMembership);
 router.delete("/memberships/:id", membershipController.deleteMembership);
-router.get("/purchased-memberships", purchasedCardAdminController.getAllPurchasedCardsAdmin);
 
+router.get("/purchased-memberships", purchasedCardAdminController.getAllPurchasedCardsAdmin);
+router.delete('/purchased-memberships/:id', authorize(1), purchasedCardAdminController.deletePurchasedCard);
+// --- Ritual Management ---
 // --- Ritual Management ---
 router.get("/rituals", ritualController.getRituals);
+
+// 🎯 FIX: Add this missing route so the Edit/View pages can fetch the data!
+router.get("/rituals/:id", ritualController.getRitualById);
+
 router.post("/rituals", upload.single('image'), ritualController.createRitual);
 router.put("/rituals/update/:id", upload.single('image'), ritualController.updateRitual);
-router.delete("/rituals/:id", ritualController.deleteRitual); 
+router.delete("/rituals/:id", ritualController.deleteRitual);
 
 // --- Ritual Metadata ---
 router.get("/ritual-types", ritualTypeController.getRitualTypes);
