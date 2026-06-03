@@ -1,6 +1,5 @@
 /**
- * STM MERN Backend - Unified Server
- * Logic: Automatically adapts to Local or Production mode
+ * STM MERN Backend - Unified Production Server
  */
 
 const path = require("path");
@@ -13,13 +12,13 @@ const compression = require("compression");
 const cookieParser = require("cookie-parser");
 const dotenv = require("dotenv");
 
-// Load Environment Variables
+// Load Environment
 dotenv.config();
 
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
 
-// --- 1. MIDDLEWARE SETUP ---
+// --- 1. DIRECTORY & MIDDLEWARE SETUP ---
 const directories = [path.join(__dirname, 'uploads'), path.join(__dirname, 'public/tickets')];
 directories.forEach(dir => { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); });
 
@@ -30,7 +29,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// CORS Configuration (Uses the ALLOWED_ORIGINS env variable)
+// CORS Configuration
 app.use(cors({
     origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -41,14 +40,14 @@ app.use(cors({
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/tickets', express.static(path.join(__dirname, 'public/tickets')));
 
-// --- 3. ROUTE MOUNTING ---
+// --- 3. ROUTE IMPORTS & MOUNTING ---
 const authRoutes = require("./routes/auth.routes");
 const userRoutes = require("./routes/userRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const homeRoutes = require("./routes/homeRoutes");
 
 app.use('/api/v1/auth', authRoutes);
-// Mount userRoutes to base /api/v1 to allow /api/v1/login to work seamlessly
+// 🎯 FIX: Mount userRoutes to /api/v1 so /api/v1/login works for your Flutter app
 app.use('/api/v1', userRoutes); 
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/home', homeRoutes);
