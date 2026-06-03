@@ -72,8 +72,9 @@ app.use('/api/v1', authRoutes);
 app.use('/api/v1', userRoutes);
 app.use('/api', userRoutes);
 app.use('/api/user', userRoutes);
-app.use('/api/v1/admin', adminRoutes);
+//app.use('/api/v1/admin', adminRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api', adminRoutes);
 app.use('/api/v1/home', homeRoutes);
 
 // Health Check
