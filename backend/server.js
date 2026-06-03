@@ -78,6 +78,7 @@ app.use('/api/v1/home', homeRoutes);
 // Health Check
 app.get("/", (req, res) => res.status(200).send("STM MERN Backend Running 🚀"));
 
+
 // --- 6. GLOBAL ERROR HANDLER ---
 app.use((err, req, res, next) => {
     console.error(`[${new Date().toISOString()}] Error: ${err.message}`);
