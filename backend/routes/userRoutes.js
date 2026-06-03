@@ -19,10 +19,10 @@ const offerController = require("../controllers/user/offerController");
 const userCardController = require('../controllers/user/userCardController');
 const userVoucherController = require('../controllers/user/userVoucherController');
 const { 
-  getActiveMemberships, 
-  purchaseMembershipCard, 
-  verifyMembershipPayment, 
-  getMyMembershipCard 
+  getActiveMemberships, 
+  purchaseMembershipCard, 
+  verifyMembershipPayment, 
+  getMyMembershipCard 
 } = require("../controllers/user/membershipcardController");
 
 // --- Middleware ---
@@ -31,14 +31,14 @@ const upload = require("../middleware/uploadMiddleware");
 
 // Helper: Multipart Handler
 const handleProfileUploads = (req, res, next) => {
-  const uploadFields = upload.fields([
-    { name: "profile_picture", maxCount: 1 },
-    { name: "banner_image", maxCount: 1 },
-  ]);
-  uploadFields(req, res, (err) => {
-    if (err) return res.status(400).json({ status: "false", success: false, message: err.message });
-    next();
-  });
+  const uploadFields = upload.fields([
+    { name: "profile_picture", maxCount: 1 },
+    { name: "banner_image", maxCount: 1 },
+  ]);
+  uploadFields(req, res, (err) => {
+    if (err) return res.status(400).json({ status: "false", success: false, message: err.message });
+    next();
+  });
 };
 
 // --- Routes ---
@@ -122,3 +122,4 @@ router.post("/rituals/create-order", protect, ritualController.createRitualOrder
 router.post("/rituals/verify-booking", protect, ritualController.verifyRitualBooking);
 
 module.exports = router;
+

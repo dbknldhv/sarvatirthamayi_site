@@ -141,13 +141,26 @@ exports.resendOtp = async (req, res) => {
 };
 
 // --- LOGIN ---
+// --- LOGIN ---
 exports.loginUser = async (req, res) => {
   try {
-    const { mobile, password } = req.body;
-    const cleanMobile = mobile ? String(mobile).replace(/\D/g, "").slice(-10) : "";
+    // 🎯 FIX: Explicitly extract both potential field names
+    const { mobile_number, mobile, password } = req.body;
+    
+    // Debug logging to help identify why it fails
+    console.log("DEBUG: Request Body:", JSON.stringify(req.body));
 
+    // Use whichever field is provided
+    const mobileToUse = mobile_number || mobile;
+    const cleanMobile = mobileToUse ? String(mobileToUse).replace(/\D/g, "").slice(-10) : "";
+
+    // Validation
     if (!cleanMobile || !password) {
-      return res.status(400).json({ status: "false", success: false, message: "Mobile and password are required." });
+      return res.status(400).json({ 
+        status: "false", 
+        success: false, 
+        message: "Mobile and password are required." 
+      });
     }
 
     const user = await User.findOne({ mobile_number: cleanMobile });
