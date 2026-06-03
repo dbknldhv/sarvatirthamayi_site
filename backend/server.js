@@ -70,7 +70,7 @@ const homeRoutes = require("./routes/homeRoutes");
 // This handles your /api/v1/login requests
 app.use('/api/v1', authRoutes);
 app.use('/api/v1', userRoutes);
-app.use('/api/user', userRoutes);
+app.use('/api', userRoutes);
 app.use('/api/v1/admin', adminRoutes);
 app.use('/api/v1/home', homeRoutes);
 
