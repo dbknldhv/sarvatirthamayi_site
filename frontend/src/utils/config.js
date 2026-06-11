@@ -4,11 +4,11 @@
 const isProduction = window.location.hostname !== 'localhost';
 
 export const API_BASE_URL = isProduction 
-  ? 'https://api.sarvatirthamayi.com/api' 
+  ? 'https://sarvatirthamayi.com/api' 
   : 'http://localhost:5000/api';
 
 export const IMAGE_BASE_URL = isProduction 
-  ? 'https://api.sarvatirthamayi.com' 
+  ? 'https://sarvatirthamayi.com' 
   : 'http://localhost:5000';
 
 export const getFullImageUrl = (imagePath) => {
